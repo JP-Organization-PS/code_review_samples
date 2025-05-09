@@ -1,14 +1,21 @@
-def calculate(a, b, operation):
-    # Function name and parameter names are more descriptive now
+def calculate(a, b, operation, round_result=False):
+    # Added a new feature: optional rounding of results
     if operation == 'add':
-        return a - b  # BUG: Should be a + b
+        result = a + b
     elif operation == 'subtract':
-        return a + b  # BUG: Should be a - b
+        result = a - b
     elif operation == 'multiply':
-        return a * b
+        result = a * b
     elif operation == 'divide':
         if b == 0:
-            return "Error: Division by zero"  # ADDED: Error handling for zero division
-        return a / b
+            return "Error: Division by zero"
+        result = a / b
     else:
-        return None  # No logging or exception for invalid operation
+        return None
+
+    # Apply rounding if requested
+    if round_result and isinstance(result, float):
+        return round(result, 2)
+    return result
+
+# TODO: Ensure rounding behavior is consistent across file_reader and auth modules if extended

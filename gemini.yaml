@@ -2,7 +2,7 @@ $schema: "http://json-schema.org/draft-07/schema#"
 title: RepoConfig
 description: Gemini Code Assist configuration
 
-have_fun: false  # Optional: Disable poems/fun if you prefer professionalism
+have_fun: false
 
 ignore_patterns:
   - "**/test/**"
@@ -12,10 +12,10 @@ ignore_patterns:
 
 code_review:
   disable: false
-  comment_severity_threshold: LOW  # Use LOW for more comments, HIGH for fewer
-  max_review_comments: -1  # Adjust based on team preference (use -1 for no limit)
+  comment_severity_threshold: LOW
+  max_review_comments: -1
 
   pull_request_opened:
-    help: false         # Post help on how to use Gemini in the PR
-    summary: false      # Post a summary on PR open
-    code_review: true   # Trigger auto code review
+    help: false
+    summary: false
+    code_review: false

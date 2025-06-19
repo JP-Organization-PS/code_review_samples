@@ -11,8 +11,8 @@ ignore_patterns:
   - "**/node_modules/**"
 
 code_review:
-  disable: false
-  comment_severity_threshold: LOW
+  disable: true
+  comment_severity_threshold: "LOW"
   max_review_comments: -1
 
   pull_request_opened:

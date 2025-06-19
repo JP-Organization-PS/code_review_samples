@@ -1,21 +1,10 @@
-$schema: "http://json-schema.org/draft-07/schema#"
-title: RepoConfig
-description: Gemini Code Assist configuration
-
-have_fun: false
-
-ignore_patterns:
-  - "**/test/**"
-  - "**/*.md"
-  - "**/*.json"
-  - "**/node_modules/**"
-
+have_fun: true
 code_review:
-  disable: true
-  comment_severity_threshold: "LOW"
+  disable: false
+  comment_severity_threshold: MEDIUM
   max_review_comments: -1
-
   pull_request_opened:
     help: false
-    summary: false
-    code_review: false
+    summary: true
+    code_review: true
+ignore_patterns: []

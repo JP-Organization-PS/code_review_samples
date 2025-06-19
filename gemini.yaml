@@ -18,4 +18,4 @@ code_review:
   pull_request_opened:
     help: false         # Post help on how to use Gemini in the PR
     summary: false      # Post a summary on PR open
-    code_review: true   # Trigger auto code review
+    code_review: false  # Trigger auto code review

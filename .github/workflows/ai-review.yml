@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write  # <-- THIS is what allows commenting
+  pull-requests: write
 
 jobs:
   ai_review:
@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # needed for full git history to access base branch
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -26,9 +28,10 @@ jobs:
       - name: Run AI Code Review
         run: node .github/scripts/ai-review.js
         env:
-          AI_MODEL: gemini
+          AI_MODEL: gemini  # or 'azure'
           AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}

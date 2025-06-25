@@ -17,16 +17,17 @@ const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/
 // === GET GIT DIFF === //
 let diff = '';
 try {
-  diff = execSync('git diff origin/main...HEAD', { stdio: 'pipe' }).toString();
+  const base = process.env.GITHUB_BASE_REF || 'main';
+  execSync(`git fetch origin ${base}`, { stdio: 'inherit' }); // Ensure base branch is available
+  diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
   if (!diff.trim()) {
-    console.log("✅ No changes detected — skipping AI code review.");
-    process.exit(0); // Exit without running review
+    console.log("✅ No changes to review. Skipping AI code review.");
+    process.exit(0);
   }
 } catch (e) {
   console.error("❌ Failed to get git diff:", e.message);
   process.exit(1);
 }
-
 
 // === PROMPT === //
 const prompt = `

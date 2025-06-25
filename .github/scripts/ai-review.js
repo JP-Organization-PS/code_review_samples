@@ -46,12 +46,10 @@ List good practices.
 
 ### ⚠️ Issues & Suggestions
 
-| Severity    | Issue Description                                                                 |
-|-------------|-------------------------------------------------------------------------------------|
-| [INFO]      | Minor note or general suggestion.                                                  |
-| [MINOR]     | Small improvement.                                                                 |
-| [MAJOR]     | Likely bug.                                                                        |
-| [CRITICAL]  | Definite bug or security risk.                                                     |
+- [INFO] Minor note or general suggestion.
+- [MINOR] Small improvement.
+- [MAJOR] Likely bug.
+- [CRITICAL] Definite bug or security risk.
 
 ---
 
@@ -61,7 +59,7 @@ Use code blocks for suggestions.
 Respond ONLY with the structured markdown above.`;
 
 // Full prompt with diff
-const prompt = `${basePrompt}\n\nHere is the code diff:\n\n\`\`\`diff\n${diff}\n\`\`\``;
+const prompt = `${basePrompt}\n\nHere is the code diff:\n\n\u0060\u0060\u0060diff\n${diff}\n\u0060\u0060\u0060`;
 
 // Call Azure OpenAI
 async function runWithAzureOpenAI() {
@@ -120,16 +118,15 @@ async function postCommentsPerIssue(reviewText) {
 
     const octokit = github.getOctokit(token);
 
-    // Extract issue table
-    const issueSectionMatch = reviewText.match(/### ⚠️ Issues & Suggestions([\s\S]*?)---/);
-    const issueTable = issueSectionMatch?.[1] || '';
-
-    const issueRegex = /\| \[([A-Z]+)\]\s+\|\s+(.*?)\s+\|/g;
-    const issues = [];
-    let match;
-    while ((match = issueRegex.exec(issueTable)) !== null) {
-      issues.push(`**Severity:** ${match[1]}\n\n${match[2]}`);
-    }
+    const issuesSection = reviewText.split('### ⚠️ Issues & Suggestions')[1]?.split('---')[0] || '';
+    const issueRegex = /\*\*(.*?)\*\*:?\s*(.*?)$/gm;
+    const lines = issuesSection.split('\n').filter(line => /\[.*?\]/.test(line));
+    const issues = lines.map(line => {
+      const match = line.match(/\[(.*?)\]\s*:?\s*(.*)/);
+      if (match) {
+        return `**Severity:** ${match[1]}\n\n${match[2]}`;
+      }
+    }).filter(Boolean);
 
     if (!issues.length) {
       await octokit.rest.issues.createComment({
@@ -138,7 +135,7 @@ async function postCommentsPerIssue(reviewText) {
         issue_number: prNumber,
         body: reviewText
       });
-      console.log("🟢 Posted single summary comment (no individual issues found).");
+      console.log("🟢 Posted single summary comment (no individual issues found).”);
       return;
     }
 

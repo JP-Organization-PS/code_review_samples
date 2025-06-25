@@ -2,7 +2,6 @@ const axios = require('axios');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
 
-// ENV configuration
 const model = process.env.AI_MODEL || 'gemini';
 const azureKey = process.env.AZURE_OPENAI_KEY;
 const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
@@ -10,12 +9,13 @@ const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
 const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
-// Get git diff from PR
 let diff = '';
+let sha = '';
 try {
   const base = process.env.GITHUB_BASE_REF || 'main';
   execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
   diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
+  sha = execSync('git rev-parse HEAD').toString().trim();
   if (!diff.trim()) {
     console.log("✅ No changes to review. Skipping AI code review.");
     process.exit(0);
@@ -25,147 +25,114 @@ try {
   process.exit(1);
 }
 
-// Prompt template
-const basePrompt = `You are an expert software engineer and code reviewer known for your attention to detail and deep understanding of clean code, performance optimization, security, and maintainability.
+const structuredPrompt = `You are an expert code reviewer.
 
-Your task is to **analyze the following code diff** and generate a professional code review in structured **GitHub-compatible Markdown**.
+Analyze the following git diff and return a JSON array of inline review comments in this format:
 
-Please use the following format in your response:
+[
+  {
+    "file": "src/app.js",
+    "position": 12,
+    "comment": "Consider using const instead of let."
+  },
+  ...
+]
 
----
+Only return valid JSON. Here is the diff:
 
-### 📘 Overview
-Provide a high-level summary of what this code change does.
+\n\n\u0060\u0060\u0060diff\n${diff}\n\u0060\u0060\u0060`;
 
----
-
-### ✅ Highlights
-List good practices.
-
----
-
-### ⚠️ Issues & Suggestions
-
-- [INFO] Minor note or general suggestion.
-- [MINOR] Small improvement.
-- [MAJOR] Likely bug.
-- [CRITICAL] Definite bug or security risk.
-
----
-
-### 💡 Suggestions
-Use code blocks for suggestions.
-
-Respond ONLY with the structured markdown above.`;
-
-// Full prompt with diff
-const prompt = `${basePrompt}\n\nHere is the code diff:\n\n\u0060\u0060\u0060diff\n${diff}\n\u0060\u0060\u0060`;
-
-// Call Azure OpenAI
-async function runWithAzureOpenAI() {
-  console.log("🔹 Using Azure OpenAI...");
-  const res = await axios.post(
-    `${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-03-01-preview`,
-    {
-      messages: [
-        { role: "system", content: "You are a professional code reviewer." },
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.3,
-      max_tokens: 4096
-    },
-    {
-      headers: {
-        "api-key": azureKey,
-        "Content-Type": "application/json"
+async function runAIModel() {
+  if (model === 'azure') {
+    console.log("🔹 Using Azure OpenAI...");
+    const res = await axios.post(
+      `${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-03-01-preview`,
+      {
+        messages: [
+          { role: "system", content: "You are a professional code reviewer." },
+          { role: "user", content: structuredPrompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 4096
+      },
+      {
+        headers: {
+          "api-key": azureKey,
+          "Content-Type": "application/json"
+        }
       }
-    }
-  );
-  return res.data.choices?.[0]?.message?.content?.trim() || "No response from Azure OpenAI.";
-}
-
-// Call Gemini API
-async function runWithGemini() {
-  console.log("🔷 Using Gemini...");
-  const res = await axios.post(
-    geminiEndpoint,
-    {
-      contents: [{ parts: [{ text: prompt }], role: "user" }],
-      generationConfig: {
-        temperature: 0.1,
-        topP: 0.9,
-        maxOutputTokens: 8192
+    );
+    return res.data.choices?.[0]?.message?.content;
+  } else {
+    console.log("🔷 Using Gemini...");
+    const res = await axios.post(
+      geminiEndpoint,
+      {
+        contents: [{ parts: [{ text: structuredPrompt }], role: "user" }],
+        generationConfig: {
+          temperature: 0.1,
+          topP: 0.9,
+          maxOutputTokens: 8192
+        }
+      },
+      {
+        headers: {
+          "Content-Type": "application/json"
+        }
       }
-    },
-    {
-      headers: {
-        "Content-Type": "application/json"
-      }
-    }
-  );
-  return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
-}
-
-// Post each issue as a separate comment
-async function postCommentsPerIssue(reviewText) {
-  try {
-    const token = process.env.GITHUB_TOKEN;
-    const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
-    const prMatch = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/);
-    const prNumber = prMatch?.[1];
-
-    if (!token || !owner || !repo || !prNumber) throw new Error("Missing PR context");
-
-    const octokit = github.getOctokit(token);
-
-    const issuesSection = reviewText.split('### ⚠️ Issues & Suggestions')[1]?.split('---')[0] || '';
-    const issueRegex = /\*\*(.*?)\*\*:?\s*(.*?)$/gm;
-    const lines = issuesSection.split('\n').filter(line => /\[.*?\]/.test(line));
-    const issues = lines.map(line => {
-      const match = line.match(/\[(.*?)\]\s*:?\s*(.*)/);
-      if (match) {
-        return `**Severity:** ${match[1]}\n\n${match[2]}`;
-      }
-    }).filter(Boolean);
-
-    if (!issues.length) {
-      await octokit.rest.issues.createComment({
-        owner,
-        repo,
-        issue_number: prNumber,
-        body: reviewText
-      });
-      console.log("🟢 Posted single summary comment (no individual issues found).");
-      return;
-    }
-
-    for (const issue of issues) {
-      await octokit.rest.issues.createComment({
-        owner,
-        repo,
-        issue_number: prNumber,
-        body: `### ⚠️ Code Review Issue\n\n${issue}\n\n_You may resolve this conversation once addressed._`
-      });
-    }
-
-    console.log(`✅ Posted ${issues.length} individual issue comments to PR #${prNumber}`);
-  } catch (err) {
-    console.error("❌ Failed to post comments:", err.message);
+    );
+    return res.data.candidates?.[0]?.content?.parts?.[0]?.text;
   }
 }
 
-// Run the full flow
-async function reviewCode() {
+async function postInlineComments(commentsJSON) {
+  const token = process.env.GITHUB_TOKEN;
+  const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
+  const prMatch = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/);
+  const prNumber = prMatch?.[1];
+
+  if (!token || !owner || !repo || !prNumber || !sha) throw new Error("Missing GitHub context");
+  const octokit = github.getOctokit(token);
+
+  let comments;
   try {
-    const review = model === 'azure' ? await runWithAzureOpenAI() : await runWithGemini();
-    console.log("\n🔍 AI Review:\n");
-    console.log(review);
-    if (process.env.GITHUB_TOKEN) {
-      await postCommentsPerIssue(review);
+    comments = JSON.parse(commentsJSON);
+  } catch (e) {
+    console.error("❌ Failed to parse AI JSON:", e.message);
+    return;
+  }
+
+  if (!Array.isArray(comments) || comments.length === 0) {
+    console.log("🟢 No inline comments generated by AI.");
+    return;
+  }
+
+  for (const item of comments) {
+    if (!item.file || typeof item.position !== 'number' || !item.comment) continue;
+    try {
+      await octokit.rest.pulls.createReviewComment({
+        owner,
+        repo,
+        pull_number: prNumber,
+        commit_id: sha,
+        path: item.file,
+        position: item.position,
+        body: item.comment
+      });
+      console.log(`💬 Posted comment on ${item.file} at position ${item.position}`);
+    } catch (err) {
+      console.error("❌ Failed to post inline comment:", err.message);
     }
-  } catch (err) {
-    console.error("❌ Error during AI review:", err.response?.data || err.message);
   }
 }
 
-reviewCode();
+(async () => {
+  try {
+    const response = await runAIModel();
+    console.log("\n🔍 Raw AI Output:");
+    console.log(response);
+    await postInlineComments(response);
+  } catch (err) {
+    console.error("❌ Error in review flow:", err.response?.data || err.message);
+  }
+})();

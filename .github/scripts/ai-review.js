@@ -1,59 +1,55 @@
 const axios = require('axios');
 const { execSync } = require('child_process');
+const github = require('@actions/github');
 
-// === CONFIGURATION === //
-const model = process.env.AI_MODEL || 'gemini'; // 'azure' or 'gemini'
-
-// --- Azure OpenAI Settings --- //
+const model = process.env.AI_MODEL || 'gemini';
 const azureKey = process.env.AZURE_OPENAI_KEY;
 const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-
-// --- Gemini Settings --- //
 const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
-// === GET DIFF === //
 let diff = '';
 try {
-  diff = execSync('git diff HEAD~1 HEAD', { stdio: 'pipe' }).toString();
-  if (!diff.trim()) throw new Error('Empty diff');
+  const base = process.env.GITHUB_BASE_REF || 'main';
+  execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
+  diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
+  if (!diff.trim()) {
+    console.log("✅ No changes to review. Skipping AI code review.");
+    process.exit(0);
+  }
 } catch (e) {
-  console.warn("Git diff failed. Using fallback diff.");
-  diff = `diff --git a/index.js b/index.js
-          index 0000001..0ddf2ba
-          --- a/index.js
-          +++ b/index.js
-          @@ -0,0 +1,3 @@
-          +function greet(name) {
-          +  return "Hello " + name;
-          +}`;
+  console.error("❌ Failed to get git diff:", e.message);
+  process.exit(1);
 }
 
-// === PROMPT === //
-const prompt = `
-You are an expert software engineer and code reviewer specializing in clean code, security, performance, and maintainability.
+const basePrompt = `You are an expert software engineer and code reviewer. Provide a structured, Markdown-formatted code review in the following format:
 
-Please carefully review the following code diff and provide detailed feedback.
+### \ud83d\udcd8 Overview
+A high-level summary of the changes.
 
-Your response should include:
+### \u2705 Highlights
+- Good practices
 
-1. **Overall Summary** – A brief summary of the change and your general impression.
-2. **Positive Aspects** – Highlight any good practices or improvements made.
-3. **Issues/Concerns** – Mention any bugs, anti-patterns, security concerns, or performance problems.
-4. **Suggestions** – Recommend improvements, better design patterns, or more idiomatic approaches.
-5. **Severity Tags** – Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion.
+### \u26a0\ufe0f Issues & Suggestions
+| Type | Description |
+|------|-------------|
+| [INFO] | ... |
+| [MINOR] | ... |
+| [MAJOR] | ... |
+| [CRITICAL] | ... |
 
-Respond in Markdown format to make it suitable for posting directly on GitHub PRs.
+### \ud83d\udca1 Suggestions
+Code blocks showing improvements
 
-Here is the code diff:
-\`\`\`diff
-${diff}
-\`\`\`
-`;
+Respond only with the formatted review.`;
+
+const prompt = `${basePrompt}\n\nHere is the code diff:\n\n\
+\
+\`\`\`diff\n${diff}\n\`\`\``;
 
 async function runWithAzureOpenAI() {
-  console.log("Using Azure OpenAI...");
+  console.log("\ud83d\udd39 Using Azure OpenAI...");
   const res = await axios.post(
     `${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-03-01-preview`,
     {
@@ -71,12 +67,11 @@ async function runWithAzureOpenAI() {
       }
     }
   );
-
   return res.data.choices?.[0]?.message?.content?.trim() || "No response from Azure OpenAI.";
 }
 
 async function runWithGemini() {
-  console.log("Using Gemini...");
+  console.log("\ud83d\udd36 Using Gemini...");
   const res = await axios.post(
     geminiEndpoint,
     {
@@ -98,26 +93,43 @@ async function runWithGemini() {
       }
     }
   );
-
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
+}
+
+async function postCommentToGitHubPR(reviewText) {
+  try {
+    const token = process.env.GITHUB_TOKEN;
+    const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
+    const prMatch = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/);
+    const prNumber = prMatch?.[1];
+
+    if (!token || !owner || !repo || !prNumber) throw new Error("Missing PR context");
+
+    const octokit = github.getOctokit(token);
+    await octokit.rest.issues.createComment({
+      owner,
+      repo,
+      issue_number: prNumber,
+      body: reviewText
+    });
+
+    console.log(`\u2705 Comment posted to PR #${prNumber}`);
+  } catch (err) {
+    console.error("\u274c Failed to post PR comment:", err.message);
+  }
 }
 
 async function reviewCode() {
   try {
-    let review = '';
-
-    if (model === 'azure') {
-      review = await runWithAzureOpenAI();
-    } else if (model === 'gemini') {
-      review = await runWithGemini();
-    } else {
-      throw new Error("Unsupported model: use 'azure' or 'gemini'");
-    }
-
-    console.log("\nAI Code Review Output:\n");
+    let review = model === 'azure' ? await runWithAzureOpenAI() : await runWithGemini();
+    console.log("\n\ud83d\udd0d AI Code Review Output:\n");
     console.log(review);
+
+    if (process.env.GITHUB_TOKEN) {
+      await postCommentToGitHubPR(review);
+    }
   } catch (err) {
-    console.error("Error during AI review:", err.response?.data || err.message);
+    console.error("\u274c Error during AI review:", err.response?.data || err.message);
   }
 }
 

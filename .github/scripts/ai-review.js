@@ -17,19 +17,16 @@ const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/
 // === GET GIT DIFF === //
 let diff = '';
 try {
-  diff = execSync('git diff HEAD~1 HEAD', { stdio: 'pipe' }).toString();
-  if (!diff.trim()) throw new Error('Empty diff');
+  diff = execSync('git diff origin/main...HEAD', { stdio: 'pipe' }).toString();
+  if (!diff.trim()) {
+    console.log("✅ No changes detected — skipping AI code review.");
+    process.exit(0); // Exit without running review
+  }
 } catch (e) {
-  console.warn("⚠️ Git diff failed. Using fallback diff.");
-  diff = `diff --git a/index.js b/index.js
-index 0000001..0ddf2ba
---- a/index.js
-+++ b/index.js
-@@ -0,0 +1,3 @@
-+function greet(name) {
-+  return "Hello " + name;
-+}`;
+  console.error("❌ Failed to get git diff:", e.message);
+  process.exit(1);
 }
+
 
 // === PROMPT === //
 const prompt = `

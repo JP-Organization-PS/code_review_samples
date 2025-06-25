@@ -30,13 +30,13 @@ Analyze the following git diff and return a JSON array of inline review comments
 [
   {
     "file": "src/app.js",
-    "line": 42,
-    "comment": "Consider using const instead of let."
+    "lineText": "  return some_unused_variable",
+    "comment": "Remove unused variable to clean up code."
   },
   ...
 ]
 
-Only return valid JSON. Do not include markdown or text outside the JSON. Here is the diff:
+Only include lines that are added (begin with '+'). Do not include markdown or text outside the JSON. Here is the diff:
 
 ${diff}`;
 
@@ -111,41 +111,32 @@ async function postInlineComments(commentsJSON) {
   }
 
   for (const item of comments) {
-    if (!item.file || typeof item.line !== 'number' || !item.comment) continue;
+    if (!item.file || !item.lineText || !item.comment) continue;
 
     const fileData = files.data.find(f => f.filename === item.file);
     if (!fileData || !fileData.patch) continue;
 
     const lines = fileData.patch.split('\n');
     let position = null;
-    let newLineNumber = 0;
     let patchPosition = 0;
-    let currentLine = 0;
 
     for (const line of lines) {
-      const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
-      if (hunkMatch) {
-        newLineNumber = parseInt(hunkMatch[1], 10);
-        currentLine = newLineNumber;
+      if (line.startsWith('@@')) {
         patchPosition = 0;
         continue;
       }
-
       patchPosition++;
-
       if (line.startsWith('+') && !line.startsWith('+++')) {
-        if (currentLine === item.line) {
+        const content = line.substring(1).trim();
+        if (content === item.lineText.trim()) {
           position = patchPosition;
           break;
         }
-        currentLine++;
-      } else if (line.startsWith(' ')) {
-        currentLine++;
       }
     }
 
     if (position === null) {
-      console.warn(`⚠️ Could not map line ${item.line} to a valid position in ${item.file}`);
+      console.warn(`⚠️ Could not map line text to a valid position in ${item.file}`);
       continue;
     }
 

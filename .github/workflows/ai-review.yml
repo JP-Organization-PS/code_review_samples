@@ -5,10 +5,10 @@ on:
     types: [opened, synchronize]
 
 jobs:
-  review:
+  ai_review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -16,14 +16,15 @@ jobs:
         with:
           node-version: 18
 
-      - name: Install Dependencies
-        run: npm install axios
+      - name: Install dependencies
+        run: npm install axios @actions/github
 
       - name: Run AI Code Review
         run: node .github/scripts/ai-review.js
         env:
-          AI_MODEL: gemini
+          AI_MODEL: gemini # or 'azure'
           AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,8 +1,9 @@
 const axios = require('axios');
 const { execSync } = require('child_process');
+const github = require('@actions/github');
 
 // === CONFIGURATION === //
-const model = process.env.AI_MODEL || 'gemini'; // 'azure' or 'gemini'
+const model = process.env.AI_MODEL || 'gemini'; // Options: 'gemini' or 'azure'
 
 // --- Azure OpenAI Settings --- //
 const azureKey = process.env.AZURE_OPENAI_KEY;
@@ -13,21 +14,21 @@ const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
 const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
-// === GET DIFF === //
+// === GET GIT DIFF === //
 let diff = '';
 try {
   diff = execSync('git diff HEAD~1 HEAD', { stdio: 'pipe' }).toString();
   if (!diff.trim()) throw new Error('Empty diff');
 } catch (e) {
-  console.warn("Git diff failed. Using fallback diff.");
+  console.warn("⚠️ Git diff failed. Using fallback diff.");
   diff = `diff --git a/index.js b/index.js
-          index 0000001..0ddf2ba
-          --- a/index.js
-          +++ b/index.js
-          @@ -0,0 +1,3 @@
-          +function greet(name) {
-          +  return "Hello " + name;
-          +}`;
+index 0000001..0ddf2ba
+--- a/index.js
++++ b/index.js
+@@ -0,0 +1,3 @@
++function greet(name) {
++  return "Hello " + name;
++}`;
 }
 
 // === PROMPT === //
@@ -52,8 +53,9 @@ ${diff}
 \`\`\`
 `;
 
+// === AI Clients === //
 async function runWithAzureOpenAI() {
-  console.log("Using Azure OpenAI...");
+  console.log("🔷 Using Azure OpenAI...");
   const res = await axios.post(
     `${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-03-01-preview`,
     {
@@ -76,7 +78,7 @@ async function runWithAzureOpenAI() {
 }
 
 async function runWithGemini() {
-  console.log("Using Gemini...");
+  console.log("🔶 Using Gemini...");
   const res = await axios.post(
     geminiEndpoint,
     {
@@ -102,6 +104,38 @@ async function runWithGemini() {
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
 }
 
+// === Post PR Comment === //
+async function postCommentToGitHubPR(reviewText) {
+  try {
+    const token = process.env.GITHUB_TOKEN;
+    if (!token) throw new Error("GITHUB_TOKEN is not set.");
+
+    const octokit = github.getOctokit(token);
+    const repo = process.env.GITHUB_REPOSITORY;
+    const ref = process.env.GITHUB_REF;
+
+    if (!repo || !ref) throw new Error("GITHUB_REPOSITORY or GITHUB_REF is not set.");
+
+    const [owner, repoName] = repo.split('/');
+    const match = ref.match(/refs\/pull\/(\d+)\/merge/);
+    const prNumber = match?.[1];
+
+    if (!prNumber) throw new Error("Cannot determine PR number from GITHUB_REF.");
+
+    await octokit.rest.issues.createComment({
+      owner,
+      repo: repoName,
+      issue_number: prNumber,
+      body: reviewText
+    });
+
+    console.log(`✅ Posted AI review as PR comment on #${prNumber}`);
+  } catch (err) {
+    console.error("❌ Failed to post comment to GitHub PR:", err.message);
+  }
+}
+
+// === Main Logic === //
 async function reviewCode() {
   try {
     let review = '';
@@ -114,10 +148,14 @@ async function reviewCode() {
       throw new Error("Unsupported model: use 'azure' or 'gemini'");
     }
 
-    console.log("\nAI Code Review Output:\n");
+    console.log("\n🔍 AI Code Review Output:\n");
     console.log(review);
+
+    if (process.env.GITHUB_TOKEN && process.env.GITHUB_REPOSITORY && process.env.GITHUB_REF) {
+      await postCommentToGitHubPR(review);
+    }
   } catch (err) {
-    console.error("Error during AI review:", err.response?.data || err.message);
+    console.error("❌ Error during AI review:", err.response?.data || err.message);
   }
 }
 

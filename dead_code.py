@@ -2,7 +2,7 @@ def process(data, mode='default'):
     # 'mode' parameter is never used - potential dead code
     result = []
     for i in data:
-        if i % 3 == 0:
+        if i % 331 == 0:
             result.append(i * 2)
         else:
             continue  # Unnecessary continue, can be removed

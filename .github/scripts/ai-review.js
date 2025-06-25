@@ -30,7 +30,7 @@ Analyze the following git diff and return a JSON array of inline review comments
 [
   {
     "file": "src/app.js",
-    "position": 12,
+    "line": 42,
     "comment": "Consider using const instead of let."
   },
   ...
@@ -92,9 +92,9 @@ async function postInlineComments(commentsJSON) {
   if (!token || !owner || !repo || !prNumber) throw new Error("Missing GitHub context");
   const octokit = github.getOctokit(token);
 
-  // ✅ Get correct commit SHA for PR head
   const prInfo = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
   const sha = prInfo.data.head.sha;
+  const files = await octokit.rest.pulls.listFiles({ owner, repo, pull_number: prNumber });
 
   let comments;
   try {
@@ -111,7 +111,30 @@ async function postInlineComments(commentsJSON) {
   }
 
   for (const item of comments) {
-    if (!item.file || typeof item.position !== 'number' || !item.comment) continue;
+    if (!item.file || typeof item.line !== 'number' || !item.comment) continue;
+
+    const fileData = files.data.find(f => f.filename === item.file);
+    if (!fileData || !fileData.patch) continue;
+
+    const lines = fileData.patch.split('\n');
+    let position = null;
+    let currentLine = 0;
+    let patchLineNumber = 0;
+
+    for (const line of lines) {
+      if (line.startsWith('+') && !line.startsWith('+++')) currentLine++;
+      if (!line.startsWith('-')) patchLineNumber++;
+      if (currentLine === item.line) {
+        position = patchLineNumber;
+        break;
+      }
+    }
+
+    if (position === null) {
+      console.warn(`⚠️ Could not map line ${item.line} to a valid position in ${item.file}`);
+      continue;
+    }
+
     try {
       await octokit.rest.pulls.createReviewComment({
         owner,
@@ -119,10 +142,10 @@ async function postInlineComments(commentsJSON) {
         pull_number: prNumber,
         commit_id: sha,
         path: item.file,
-        position: item.position,
+        position,
         body: item.comment
       });
-      console.log(`💬 Posted comment on ${item.file} at position ${item.position}`);
+      console.log(`💬 Posted comment on ${item.file} at position ${position}`);
     } catch (err) {
       console.error("❌ Failed to post inline comment:", err.message);
     }

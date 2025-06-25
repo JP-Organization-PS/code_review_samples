@@ -23,30 +23,47 @@ try {
   process.exit(1);
 }
 
-const basePrompt = `You are an expert software engineer and code reviewer. Provide a structured, Markdown-formatted code review in the following format:
+const basePrompt = `You are an expert software engineer and code reviewer known for your attention to detail and deep understanding of clean code, performance optimization, security, and maintainability.
 
-### \ud83d\udcd8 Overview
-A high-level summary of the changes.
+Your task is to **analyze the following code diff** and generate a professional code review in structured **GitHub-compatible Markdown**.
 
-### \u2705 Highlights
-- Good practices
+Please use the following format in your response:
 
-### \u26a0\ufe0f Issues & Suggestions
-| Type | Description |
-|------|-------------|
-| [INFO] | ... |
-| [MINOR] | ... |
-| [MAJOR] | ... |
-| [CRITICAL] | ... |
+---
 
-### \ud83d\udca1 Suggestions
-Code blocks showing improvements
+### 📘 Overview
+Provide a high-level summary of what this code change does. Mention the overall intent and affected components.
 
-Respond only with the formatted review.`;
+---
 
-const prompt = `${basePrompt}\n\nHere is the code diff:\n\n\
-\
-\`\`\`diff\n${diff}\n\`\`\``;
+### ✅ Highlights
+List good practices observed in the diff, such as clear naming, good structure, efficiency, or use of best practices.
+
+- Example: Uses descriptive variable names.
+- Example: Handles edge cases effectively.
+
+---
+
+### ⚠️ Issues & Suggestions
+
+Present any concerns, bugs, anti-patterns, or areas for improvement using a table.
+
+| Severity    | Issue Description                                                                 |
+|-------------|-------------------------------------------------------------------------------------|
+| [INFO]      | Minor note or general suggestion.                                                  |
+| [MINOR]     | Small improvement that can enhance readability or maintainability.                 |
+| [MAJOR]     | Likely bug or problematic pattern affecting correctness, performance, or design.  |
+| [CRITICAL]  | Definite bug, security risk, or significant architectural issue.                   |
+
+---
+
+### 💡 Suggestions
+
+Provide concrete code suggestions using code blocks where possible. Aim to show improved or idiomatic alternatives, if applicable.
+
+Respond ONLY with the formatted review above — **do not add explanation outside the structure**.`;
+
+const prompt = `${basePrompt}\n\nHere is the code diff:\n\n\`\`\`diff\n${diff}\n\`\`\``;
 
 async function runWithAzureOpenAI() {
   console.log("\ud83d\udd39 Using Azure OpenAI...");

@@ -66,7 +66,7 @@ Respond ONLY with the formatted review above — **do not add explanation outsid
 const prompt = `${basePrompt}\n\nHere is the code diff:\n\n\`\`\`diff\n${diff}\n\`\`\``;
 
 async function runWithAzureOpenAI() {
-  console.log("\ud83d\udd39 Using Azure OpenAI...");
+  console.log("🔹 Using Azure OpenAI...");
   const res = await axios.post(
     `${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-03-01-preview`,
     {
@@ -88,7 +88,7 @@ async function runWithAzureOpenAI() {
 }
 
 async function runWithGemini() {
-  console.log("\ud83d\udd36 Using Gemini...");
+  console.log("🔷 Using Gemini...");
   const res = await axios.post(
     geminiEndpoint,
     {
@@ -113,7 +113,7 @@ async function runWithGemini() {
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
 }
 
-async function postCommentToGitHubPR(reviewText) {
+async function postCommentsPerIssue(reviewText) {
   try {
     const token = process.env.GITHUB_TOKEN;
     const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
@@ -123,30 +123,56 @@ async function postCommentToGitHubPR(reviewText) {
     if (!token || !owner || !repo || !prNumber) throw new Error("Missing PR context");
 
     const octokit = github.getOctokit(token);
-    await octokit.rest.issues.createComment({
-      owner,
-      repo,
-      issue_number: prNumber,
-      body: reviewText
-    });
 
-    console.log(`\u2705 Comment posted to PR #${prNumber}`);
+    // Extract issues from the "⚠️ Issues & Suggestions" table
+    const issueSectionMatch = reviewText.match(/### ⚠️ Issues & Suggestions([\s\S]*?)---/);
+    const issueTable = issueSectionMatch?.[1] || '';
+
+    const issueRegex = /\| \[([A-Z]+)\]\s+\|\s+(.*?)\s+\|/g;
+    const issues = [];
+    let match;
+    while ((match = issueRegex.exec(issueTable)) !== null) {
+      issues.push(`**Severity:** ${match[1]}\n\n${match[2]}`);
+    }
+
+    if (!issues.length) {
+      // Post full review if no table issues are found
+      await octokit.rest.issues.createComment({
+        owner,
+        repo,
+        issue_number: prNumber,
+        body: reviewText
+      });
+      console.log("🟢 Posted full review instead (no issues extracted).");
+      return;
+    }
+
+    for (const issue of issues) {
+      await octokit.rest.issues.createComment({
+        owner,
+        repo,
+        issue_number: prNumber,
+        body: `### ⚠️ Code Review Issue\n\n${issue}\n\n_You may resolve this conversation once addressed._`
+      });
+    }
+
+    console.log(`✅ Posted ${issues.length} individual issue comments to PR #${prNumber}`);
   } catch (err) {
-    console.error("\u274c Failed to post PR comment:", err.message);
+    console.error("❌ Failed to post per-issue comments:", err.message);
   }
 }
 
 async function reviewCode() {
   try {
     let review = model === 'azure' ? await runWithAzureOpenAI() : await runWithGemini();
-    console.log("\n\ud83d\udd0d AI Code Review Output:\n");
+    console.log("\n🔍 AI Code Review Output:\n");
     console.log(review);
 
     if (process.env.GITHUB_TOKEN) {
-      await postCommentToGitHubPR(review);
+      await postCommentsPerIssue(review);
     }
   } catch (err) {
-    console.error("\u274c Error during AI review:", err.response?.data || err.message);
+    console.error("❌ Error during AI review:", err.response?.data || err.message);
   }
 }
 

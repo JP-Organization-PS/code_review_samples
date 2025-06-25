@@ -118,28 +118,27 @@ async function postInlineComments(commentsJSON) {
 
     const lines = fileData.patch.split('\n');
     let position = null;
-    let targetLine = 0;
-    let patchLine = 0;
+    let lineInNewFile = 0;
+    let positionInPatch = 0;
     const hunkRegex = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 
     for (const line of lines) {
       const hunkMatch = line.match(hunkRegex);
       if (hunkMatch) {
-        targetLine = parseInt(hunkMatch[1], 10) - 1;
-        patchLine = 0;
+        lineInNewFile = parseInt(hunkMatch[1], 10) - 1;
         continue;
       }
 
+      positionInPatch++;
+
       if (line.startsWith('+') && !line.startsWith('+++')) {
-        targetLine++;
-        patchLine++;
-        if (targetLine === item.line) {
-          position = patchLine;
+        lineInNewFile++;
+        if (lineInNewFile === item.line) {
+          position = positionInPatch;
           break;
         }
-      } else if (!line.startsWith('-')) {
-        targetLine++;
-        patchLine++;
+      } else if (line.startsWith(' ')) {
+        lineInNewFile++;
       }
     }
 
@@ -164,7 +163,6 @@ async function postInlineComments(commentsJSON) {
     }
   }
 }
-
 
 (async () => {
   try {

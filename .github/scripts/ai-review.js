@@ -120,27 +120,27 @@ async function postInlineComments(commentsJSON) {
     let position = null;
     let newLineNumber = 0;
     let patchPosition = 0;
-    let inHunk = false;
+    let currentLine = 0;
 
     for (const line of lines) {
       const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
       if (hunkMatch) {
-        newLineNumber = parseInt(hunkMatch[1], 10) - 1;
-        inHunk = true;
+        newLineNumber = parseInt(hunkMatch[1], 10);
+        currentLine = newLineNumber;
+        patchPosition = 0;
         continue;
       }
-      if (!inHunk) continue;
 
       patchPosition++;
 
       if (line.startsWith('+') && !line.startsWith('+++')) {
-        newLineNumber++;
-        if (newLineNumber === item.line) {
+        if (currentLine === item.line) {
           position = patchPosition;
           break;
         }
+        currentLine++;
       } else if (line.startsWith(' ')) {
-        newLineNumber++;
+        currentLine++;
       }
     }
 

@@ -10,12 +10,10 @@ const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
 let diff = '';
-let sha = '';
 try {
   const base = process.env.GITHUB_BASE_REF || 'main';
   execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
   diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
-  sha = execSync('git rev-parse HEAD').toString().trim();
   if (!diff.trim()) {
     console.log("✅ No changes to review. Skipping AI code review.");
     process.exit(0);
@@ -91,8 +89,12 @@ async function postInlineComments(commentsJSON) {
   const prMatch = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/);
   const prNumber = prMatch?.[1];
 
-  if (!token || !owner || !repo || !prNumber || !sha) throw new Error("Missing GitHub context");
+  if (!token || !owner || !repo || !prNumber) throw new Error("Missing GitHub context");
   const octokit = github.getOctokit(token);
+
+  // ✅ Get correct commit SHA for PR head
+  const prInfo = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+  const sha = prInfo.data.head.sha;
 
   let comments;
   try {

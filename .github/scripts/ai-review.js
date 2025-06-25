@@ -135,7 +135,7 @@ async function postCommentsPerIssue(reviewText) {
         issue_number: prNumber,
         body: reviewText
       });
-      console.log("🟢 Posted single summary comment (no individual issues found).”);
+      console.log("🟢 Posted single summary comment (no individual issues found).");
       return;
     }
 

@@ -132,19 +132,29 @@ function extractJsonFromResponse(text) {
 
 // === Get Patch Position for a file + line === //
 function getPatchPosition(filePath, lineNumber) {
+  console.log(`\n🔍 Checking patch position for ${filePath}:${lineNumber}`);
+
   for (const file of parsedDiff) {
     if (file.to === filePath || file.from === filePath) {
+      console.log(`✅ Matched file in diff: ${file.to || file.from}`);
       let position = 0;
       for (const chunk of file.chunks) {
+        console.log(`📦 Chunk starting at old: ${chunk.oldStart}, new: ${chunk.newStart}`);
         for (const line of chunk.changes) {
           position++;
+          if (line.add) {
+            console.log(`  ➕ Line (ln: ${line.ln}, pos: ${position}): ${line.content}`);
+          }
           if (line.ln === lineNumber && line.add) {
+            console.log(`🎯 MATCH FOUND at position ${position} for line ${lineNumber}`);
             return position;
           }
         }
       }
     }
   }
+
+  console.warn(`❌ No match found for ${filePath}:${lineNumber}`);
   return null;
 }
 
@@ -170,6 +180,8 @@ async function postInlineComments(comments) {
     const [owner, repoName] = process.env.GITHUB_REPOSITORY.split('/');
     const prNumber = github.context.payload.pull_request.number;
     const commitSha = github.context.payload.pull_request.head.sha;
+
+    console.log("📋 Comments to post:", JSON.stringify(comments, null, 2));
 
     for (const comment of comments) {
       const patchPosition = getPatchPosition(comment.file, comment.line);

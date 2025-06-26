@@ -31,9 +31,9 @@ try {
 
 // === PROMPT === //
 const prompt = `
-You are an expert software engineer. Review the following code diff and provide JSON feedback with inline suggestions.
+You are an expert software engineer. Review the following code diff and return only a valid JSON array of suggestions.
 
-Use this format:
+STRICTLY return only the array in this format. Do not add any explanation or extra text.
 
 [
   {
@@ -46,8 +46,6 @@ Use this format:
     "fixed_code": "Improved or corrected version of the code line"
   }
 ]
-
-Return only valid JSON.
 
 Here is the code diff:
 \`\`\`diff
@@ -106,18 +104,25 @@ async function runWithGemini() {
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "[]";
 }
 
-// === Utility: Extract clean JSON from AI response === //
+// === JSON Extractor === //
 function extractJsonFromResponse(text) {
-  const jsonBlock = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (jsonBlock) return jsonBlock[1].trim();
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch) return codeBlockMatch[1].trim();
 
   const start = text.indexOf('[');
   const end = text.lastIndexOf(']');
   if (start !== -1 && end !== -1 && end > start) {
-    return text.substring(start, end + 1).trim();
+    const sliced = text.substring(start, end + 1).trim();
+    try {
+      JSON.parse(sliced); // test
+      return sliced;
+    } catch {
+      console.warn("⚠️ JSON slice looks malformed.");
+    }
   }
 
-  throw new Error("No valid JSON block found in AI response.");
+  console.warn("⚠️ No valid JSON block found.");
+  return "[]";
 }
 
 // === Post Inline Comments === //
@@ -167,7 +172,7 @@ ${comment.fixed_code || comment.code}
   }
 }
 
-// === Main === //
+// === Main Logic === //
 async function reviewCode() {
   try {
     let rawResponse = '';
@@ -185,13 +190,14 @@ async function reviewCode() {
     let comments = [];
     try {
       const cleanJson = extractJsonFromResponse(rawResponse);
+      console.log("🧪 Clean JSON:\n", cleanJson);
       comments = JSON.parse(cleanJson);
     } catch (err) {
       console.error("❌ Failed to parse AI response JSON:", err.message);
       return;
     }
 
-    if (comments.length === 0) {
+    if (!Array.isArray(comments) || comments.length === 0) {
       console.log("ℹ️ No inline suggestions found.");
       return;
     }

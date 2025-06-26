@@ -1,22 +1,17 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const parseDiff = require('parse-diff');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
 
-// === CONFIGURATION === //
 const model = process.env.AI_MODEL || 'gemini';
-
-// --- Azure OpenAI Settings --- //
 const azureKey = process.env.AZURE_OPENAI_KEY;
 const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-
-// --- Gemini Settings --- //
 const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
-// === GET GIT DIFF === //
 let diff = '';
 try {
   const base = process.env.GITHUB_BASE_REF || 'main';
@@ -31,7 +26,6 @@ try {
   process.exit(1);
 }
 
-// === PROMPT === //
 const prompt = `
 You are an expert software engineer. Review the following code diff and return only a valid JSON array of suggestions.
 
@@ -54,7 +48,6 @@ ${diff}
 \`\`\`
 `;
 
-// === AI Clients === //
 async function runWithAzureOpenAI() {
   console.log("🔷 Using Azure OpenAI...");
   const res = await axios.post(
@@ -146,16 +139,31 @@ async function postInlineComments(comments) {
     const prNumber = github.context.payload.pull_request.number;
     const commitSha = github.context.payload.pull_request.head.sha;
 
-    const files = await octokit.rest.pulls.listFiles({ owner, repo: repoName, pull_number: prNumber });
+    const prFiles = await octokit.rest.pulls.listFiles({ owner, repo: repoName, pull_number: prNumber });
+    const parsedDiff = parseDiff(diff);
 
     for (const comment of comments) {
-      const prFile = files.data.find(f => f.filename === comment.file);
-      if (!prFile) {
+      const prFile = prFiles.data.find(f => f.filename === comment.file);
+      const diffFile = parsedDiff.find(f => f.to === comment.file || f.from === comment.file);
+      if (!prFile || !diffFile) {
         console.warn(`⚠️ Skipping comment, file not found in PR: ${comment.file}`);
         continue;
       }
 
-      const actualCode = getLineFromFile(comment.file, comment.line);
+      const matchingHunk = diffFile.chunks.find(chunk =>
+        chunk.changes.some(c => c.ln === comment.line && c.type === 'add')
+      );
+
+      const matchedLine = matchingHunk?.changes.find(c => c.ln === comment.line && c.type === 'add');
+      const position = matchedLine?.position;
+      const actualLine = matchedLine?.ln;
+
+      if (!actualLine || !position) {
+        console.warn(`⚠️ Skipping invalid line: ${comment.line} in ${comment.file}`);
+        continue;
+      }
+
+      const actualCode = getLineFromFile(comment.file, actualLine);
 
       const body = `
 **Issue:** ${comment.severity} ${comment.issue}
@@ -180,12 +188,12 @@ ${comment.fixed_code || actualCode}
         pull_number: prNumber,
         commit_id: commitSha,
         path: comment.file,
-        line: comment.line,
+        line: actualLine,
         side: "RIGHT",
         body
       });
 
-      console.log(`💬 Posted inline comment on ${comment.file}:${comment.line}`);
+      console.log(`💬 Posted inline comment on ${comment.file}:${actualLine}`);
     }
   } catch (err) {
     console.error("❌ Failed to post inline comments:", err.message);
@@ -195,7 +203,6 @@ ${comment.fixed_code || actualCode}
 async function reviewCode() {
   try {
     let rawResponse = '';
-
     if (model === 'azure') {
       rawResponse = await runWithAzureOpenAI();
     } else if (model === 'gemini') {

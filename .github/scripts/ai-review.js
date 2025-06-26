@@ -12,7 +12,7 @@ const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
 
 // --- Gemini Settings --- //
 const geminiKey = process.env.GEMINI_API_KEY;
-const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${geminiKey}`;
+const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
 // === GET GIT DIFF === //
 let diff = '';

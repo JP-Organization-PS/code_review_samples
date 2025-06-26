@@ -33,23 +33,35 @@ try {
 const prompt = `
 You are an expert software engineer and code reviewer specializing in clean code, security, performance, and maintainability.
 
-Please carefully review the following code diff and provide detailed feedback.
+Please review the following code diff and respond in **strict JSON format**.
 
-Your response should include:
+Your JSON output must follow this structure:
 
-1. **Overall Summary** – A brief summary of the change and your general impression.
-2. **Positive Aspects** – Highlight any good practices or improvements made.
-3. **Issues/Suggestions** – Mention any bugs, anti-patterns, security concerns, or performance problems and Recommend improvements, better design patterns, or more idiomatic approaches.
-4. **Severity Tags** – Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion.
-5. **Line Reference and Snippet** – For each issue/suggestion, clearly mention the affected line number(s) and include the relevant code snippet for context.
+{
+  "overall_summary": "Brief summary of the changes and your general impression.",
+  "positive_aspects": ["List of good practices observed."],
+  "issues": [
+    {
+      "severity": "[INFO|MINOR|MAJOR|CRITICAL]",
+      "title": "Short title or label of the issue",
+      "description": "Detailed explanation of the issue or concern.",
+      "suggestion": "Proposed fix or recommendation.",
+      "file": "Relative path to file (e.g., .github/scripts/ai-review.js)",
+      "line": "Line number(s) where the issue occurs",
+      "code_snippet": "Relevant snippet of the affected code"
+    },
+    ...
+  ]
+}
 
-Respond in Markdown format to make it suitable for posting directly on GitHub PRs.
+Respond with only a single valid JSON object. No Markdown, headers, or commentary.
 
 Here is the code diff:
 \`\`\`diff
 ${diff}
 \`\`\`
 `;
+
 
 // === AI Clients === //
 async function runWithAzureOpenAI() {

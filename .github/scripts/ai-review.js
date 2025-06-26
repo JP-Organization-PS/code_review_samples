@@ -1,48 +1,38 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const parseDiff = require('parse-diff');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
-const crypto = require('crypto');
 
+// === CONFIGURATION === //
 const model = process.env.AI_MODEL || 'gemini';
+
+// --- Azure OpenAI Settings --- //
 const azureKey = process.env.AZURE_OPENAI_KEY;
 const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+
+// --- Gemini Settings --- //
 const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
+// === GET GIT DIFF === //
 let diff = '';
-async function getDiffFromLastTwoCommits() {
-  try {
-    const token = process.env.GITHUB_TOKEN;
-    const octokit = github.getOctokit(token);
-    const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
-    const prNumber = github.context.payload.pull_request.number;
-
-    const commits = await octokit.rest.pulls.listCommits({
-      owner,
-      repo,
-      pull_number: prNumber
-    });
-
-    const commitCount = commits.data.length;
-    if (commitCount < 2) {
-      console.log("🔹 PR has only one commit, using HEAD~1 diff.");
-      return execSync(`git diff HEAD~1 HEAD`).toString();
-    } else {
-      const baseSha = commits.data[commitCount - 2].sha;
-      const headSha = commits.data[commitCount - 1].sha;
-      return execSync(`git diff ${baseSha} ${headSha}`).toString();
-    }
-  } catch (e) {
-    console.error("❌ Failed to get commit diff:", e.message);
-    process.exit(1);
+try {
+  const base = process.env.GITHUB_BASE_REF || 'main';
+  execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
+  diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
+  if (!diff.trim()) {
+    console.log("✅ No changes to review. Skipping AI code review.");
+    process.exit(0);
   }
+} catch (e) {
+  console.error("❌ Failed to get git diff:", e.message);
+  process.exit(1);
 }
 
-const promptTemplate = diff => `
+// === PROMPT === //
+const prompt = `
 You are an expert software engineer. Review the following code diff and return only a valid JSON array of suggestions.
 
 STRICTLY return only the array in this format. Do not add any explanation or extra text.
@@ -50,10 +40,10 @@ STRICTLY return only the array in this format. Do not add any explanation or ext
 [
   {
     "file": "relative/path/to/file.py",
+    "line": 2,
     "severity": "[MINOR]",
     "issue": "Brief description of the issue.",
     "suggestion": "What to improve or fix.",
-    "code": "The full original line from the diff",
     "fixed_code": "Improved or corrected version of the code line"
   }
 ]
@@ -64,7 +54,9 @@ ${diff}
 \`\`\`
 `;
 
-async function runWithAzureOpenAI(prompt) {
+// === AI Clients === //
+async function runWithAzureOpenAI() {
+  console.log("🔷 Using Azure OpenAI...");
   const res = await axios.post(
     `${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-03-01-preview`,
     {
@@ -82,10 +74,12 @@ async function runWithAzureOpenAI(prompt) {
       }
     }
   );
+
   return res.data.choices?.[0]?.message?.content?.trim() || "[]";
 }
 
-async function runWithGemini(prompt) {
+async function runWithGemini() {
+  console.log("🔶 Using Gemini...");
   const res = await axios.post(
     geminiEndpoint,
     {
@@ -107,60 +101,56 @@ async function runWithGemini(prompt) {
       }
     }
   );
+
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "[]";
 }
 
+// === Extract Clean JSON from LLM === //
 function extractJsonFromResponse(text) {
   const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (codeBlockMatch) return codeBlockMatch[1].trim();
+
   const start = text.indexOf('[');
   const end = text.lastIndexOf(']');
   if (start !== -1 && end !== -1 && end > start) {
     const sliced = text.substring(start, end + 1).trim();
     try {
-      JSON.parse(sliced);
+      JSON.parse(sliced); // validate
       return sliced;
     } catch {
       console.warn("⚠️ JSON slice looks malformed.");
     }
   }
+
   console.warn("⚠️ No valid JSON block found.");
   return "[]";
 }
 
-async function postInlineComments(comments, diff) {
+// === Get Actual Code Line From File === //
+function getLineFromFile(filePath, lineNumber) {
+  try {
+    const fullPath = path.resolve(process.env.GITHUB_WORKSPACE || '.', filePath);
+    const fileLines = fs.readFileSync(fullPath, 'utf-8').split('\n');
+    return fileLines[lineNumber - 1] || '';
+  } catch (err) {
+    console.warn(`⚠️ Could not read ${filePath}:${lineNumber} - ${err.message}`);
+    return '';
+  }
+}
+
+// === Post Inline Comments === //
+async function postInlineComments(comments) {
   try {
     const token = process.env.GITHUB_TOKEN;
+    if (!token) throw new Error("GITHUB_TOKEN is not set.");
+
     const octokit = github.getOctokit(token);
     const [owner, repoName] = process.env.GITHUB_REPOSITORY.split('/');
     const prNumber = github.context.payload.pull_request.number;
     const commitSha = github.context.payload.pull_request.head.sha;
-    const prFiles = await octokit.rest.pulls.listFiles({ owner, repo: repoName, pull_number: prNumber });
-    const parsedDiff = parseDiff(diff);
 
     for (const comment of comments) {
-      const prFile = prFiles.data.find(f => f.filename === comment.file);
-      const diffFile = parsedDiff.find(f => f.to === comment.file || f.from === comment.file);
-      if (!prFile || !diffFile) {
-        console.warn(`⚠️ Skipping comment, file not found in PR: ${comment.file}`);
-        continue;
-      }
-
-      let foundChange;
-      for (const chunk of diffFile.chunks) {
-        const match = chunk.changes.find(c =>
-          c.content.trim() === comment.code.trim() && c.type === 'add'
-        );
-        if (match) {
-          foundChange = match;
-          break;
-        }
-      }
-
-      if (!foundChange || !foundChange.position) {
-        console.warn(`⚠️ Skipping: No matching added line for ${comment.file}`);
-        continue;
-      }
+      const actualCode = getLineFromFile(comment.file, comment.line);
 
       const body = `
 **Issue:** ${comment.severity} ${comment.issue}
@@ -170,12 +160,12 @@ ${comment.suggestion}
 
 **Original Code:**
 \`\`\`js
-${comment.code || ''}
+${actualCode}
 \`\`\`
 
 **Rewritten Code:**
 \`\`\`js
-${comment.fixed_code || ''}
+${comment.fixed_code || actualCode}
 \`\`\`
 `;
 
@@ -185,35 +175,37 @@ ${comment.fixed_code || ''}
         pull_number: prNumber,
         commit_id: commitSha,
         path: comment.file,
-        position: foundChange.position,
+        line: comment.line,
+        side: "RIGHT",
         body
       });
 
-      console.log(`💬 Posted inline comment on ${comment.file} at position ${foundChange.position}`);
+      console.log(`💬 Posted inline comment on ${comment.file}:${comment.line}`);
     }
   } catch (err) {
     console.error("❌ Failed to post inline comments:", err.message);
   }
 }
 
-(async function reviewCode() {
+// === Main Logic === //
+async function reviewCode() {
   try {
-    diff = await getDiffFromLastTwoCommits();
-    const prompt = promptTemplate(diff);
-
     let rawResponse = '';
+
     if (model === 'azure') {
-      rawResponse = await runWithAzureOpenAI(prompt);
+      rawResponse = await runWithAzureOpenAI();
     } else if (model === 'gemini') {
-      rawResponse = await runWithGemini(prompt);
+      rawResponse = await runWithGemini();
     } else {
       throw new Error("Unsupported model: use 'azure' or 'gemini'");
     }
 
     console.log("\n🧠 Raw AI Response:\n", rawResponse);
+
     let comments = [];
     try {
       const cleanJson = extractJsonFromResponse(rawResponse);
+      console.log("🧪 Clean JSON:\n", cleanJson);
       comments = JSON.parse(cleanJson);
     } catch (err) {
       console.error("❌ Failed to parse AI response JSON:", err.message);
@@ -225,8 +217,10 @@ ${comment.fixed_code || ''}
       return;
     }
 
-    await postInlineComments(comments, diff);
+    await postInlineComments(comments);
   } catch (err) {
     console.error("❌ Error during AI review:", err.message);
   }
-})();
+}
+
+reviewCode();

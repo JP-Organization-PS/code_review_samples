@@ -13,12 +13,11 @@ const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
 // --- Gemini Settings --- //
 const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
-
 // === GET GIT DIFF === //
 let diff = '';
 try {
   const base = process.env.GITHUB_BASE_REF || 'main';
-  execSync(`git fetch origin ${base}`, { stdio: 'inherit' }); // Ensure base branch is available
+  execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
   diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
   if (!diff.trim()) {
     console.log("✅ No changes to review. Skipping AI code review.");
@@ -31,20 +30,20 @@ try {
 
 // === PROMPT === //
 const prompt = `
-You are an expert software engineer and code reviewer specializing in clean code, security, performance, and maintainability.
+You are an expert software engineer. Please review the following code diff and return suggestions in the following JSON format:
 
-Please carefully review the following code diff and provide detailed feedback.
+[
+  {
+    "file": "relative/path/to/file.js",
+    "line": 42,
+    "severity": "[MINOR]",
+    "issue": "Unclear variable name.",
+    "suggestion": "Consider renaming the variable to 'userData'.",
+    "code": "let userData = fetchData();"
+  }
+]
 
-Your response should include:
-
-1. **Overall Summary** – A brief summary of the change and your general impression.
-2. **Positive Aspects** – Highlight any good practices or improvements made.
-3. **Issues/Concerns** – Mention any bugs, anti-patterns, security concerns, or performance problems.
-4. **Suggestions** – Recommend improvements, better design patterns, or more idiomatic approaches.
-5. **Severity Tags** – Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion.
-
-Respond in Markdown format to make it suitable for posting directly on GitHub PRs.
-
+Only include issues relevant to lines in the diff.
 Here is the code diff:
 \`\`\`diff
 ${diff}
@@ -72,7 +71,7 @@ async function runWithAzureOpenAI() {
     }
   );
 
-  return res.data.choices?.[0]?.message?.content?.trim() || "No response from Azure OpenAI.";
+  return res.data.choices?.[0]?.message?.content?.trim() || "[]";
 }
 
 async function runWithGemini() {
@@ -87,7 +86,7 @@ async function runWithGemini() {
         }
       ],
       generationConfig: {
-        temperature: 0.1,
+        temperature: 0.2,
         topP: 0.9,
         maxOutputTokens: 8192
       }
@@ -99,61 +98,85 @@ async function runWithGemini() {
     }
   );
 
-  return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
+  return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "[]";
 }
 
-// === Post PR Comment === //
-async function postCommentToGitHubPR(reviewText) {
+// === Post Inline Comments === //
+async function postInlineComments(comments) {
   try {
     const token = process.env.GITHUB_TOKEN;
     if (!token) throw new Error("GITHUB_TOKEN is not set.");
 
     const octokit = github.getOctokit(token);
-    const repo = process.env.GITHUB_REPOSITORY;
-    const ref = process.env.GITHUB_REF;
+    const [owner, repoName] = process.env.GITHUB_REPOSITORY.split('/');
+    const prNumber = github.context.payload.pull_request.number;
+    const commitSha = github.context.payload.pull_request.head.sha;
 
-    if (!repo || !ref) throw new Error("GITHUB_REPOSITORY or GITHUB_REF is not set.");
+    for (const comment of comments) {
+      const body = `
+**Issue:** ${comment.severity} ${comment.issue}
 
-    const [owner, repoName] = repo.split('/');
-    const match = ref.match(/refs\/pull\/(\d+)\/merge/);
-    const prNumber = match?.[1];
+**Suggestion:**
+${comment.suggestion}
 
-    if (!prNumber) throw new Error("Cannot determine PR number from GITHUB_REF.");
+\`\`\`js
+${comment.code}
+\`\`\`
+`;
 
-    await octokit.rest.issues.createComment({
-      owner,
-      repo: repoName,
-      issue_number: prNumber,
-      body: reviewText
-    });
+      await octokit.rest.pulls.createReviewComment({
+        owner,
+        repo: repoName,
+        pull_number: prNumber,
+        commit_id: commitSha,
+        path: comment.file,
+        line: comment.line,
+        side: "RIGHT",
+        body
+      });
 
-    console.log(`✅ Posted AI review as PR comment on #${prNumber}`);
+      console.log(`💬 Posted inline comment on ${comment.file}:${comment.line}`);
+    }
   } catch (err) {
-    console.error("❌ Failed to post comment to GitHub PR:", err.message);
+    console.error("❌ Failed to post inline comments:", err.message);
   }
 }
 
-// === Main Logic === //
+// === Main === //
 async function reviewCode() {
   try {
-    let review = '';
+    let rawResponse = '';
 
     if (model === 'azure') {
-      review = await runWithAzureOpenAI();
+      rawResponse = await runWithAzureOpenAI();
     } else if (model === 'gemini') {
-      review = await runWithGemini();
+      rawResponse = await runWithGemini();
     } else {
       throw new Error("Unsupported model: use 'azure' or 'gemini'");
     }
 
-    console.log("\n🔍 AI Code Review Output:\n");
-    console.log(review);
+    console.log("\n🧠 Raw AI Response:\n", rawResponse);
 
-    if (process.env.GITHUB_TOKEN && process.env.GITHUB_REPOSITORY && process.env.GITHUB_REF) {
-      await postCommentToGitHubPR(review);
+    // Try parsing JSON block
+    const jsonMatch = rawResponse.match(/```json([\s\S]*?)```/);
+    const jsonText = jsonMatch ? jsonMatch[1] : rawResponse;
+
+    let comments = [];
+    try {
+      comments = JSON.parse(jsonText);
+    } catch (err) {
+      console.error("❌ Failed to parse AI response JSON:", err.message);
+      return;
     }
+
+    if (comments.length === 0) {
+      console.log("ℹ️ No comments returned by the AI.");
+      return;
+    }
+
+    await postInlineComments(comments);
   } catch (err) {
-    console.error("❌ Error during AI review:", err.response?.data || err.message);
+    console.error("❌ Error during AI review:", err.message);
   }
 }
 

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
+const parseDiff = require('parse-diff');
 
 // === CONFIGURATION === //
 const model = process.env.AI_MODEL || 'gemini';
@@ -18,10 +19,13 @@ const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/
 
 // === GET GIT DIFF === //
 let diff = '';
+let parsedDiff = [];
 try {
   const base = process.env.GITHUB_BASE_REF || 'main';
   execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
   diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
+  parsedDiff = parseDiff(diff);
+
   if (!diff.trim()) {
     console.log("✅ No changes to review. Skipping AI code review.");
     process.exit(0);
@@ -39,7 +43,7 @@ STRICTLY return only the array in this format. Do not add any explanation or ext
 
 [
   {
-    "file": "relative/path/to/file.py",
+    "file": "relative/path/to/file.js",
     "line": 2,
     "severity": "[MINOR]",
     "issue": "Brief description of the issue.",
@@ -126,6 +130,24 @@ function extractJsonFromResponse(text) {
   return "[]";
 }
 
+// === Get Patch Position for a file + line === //
+function getPatchPosition(filePath, lineNumber) {
+  for (const file of parsedDiff) {
+    if (file.to === filePath || file.from === filePath) {
+      let position = 0;
+      for (const chunk of file.chunks) {
+        for (const line of chunk.changes) {
+          position++;
+          if (line.ln === lineNumber && line.add) {
+            return position;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 // === Get Actual Code Line From File === //
 function getLineFromFile(filePath, lineNumber) {
   try {
@@ -150,6 +172,12 @@ async function postInlineComments(comments) {
     const commitSha = github.context.payload.pull_request.head.sha;
 
     for (const comment of comments) {
+      const patchPosition = getPatchPosition(comment.file, comment.line);
+      if (!patchPosition) {
+        console.warn(`⚠️ Could not determine patch position for ${comment.file}:${comment.line}`);
+        continue;
+      }
+
       const actualCode = getLineFromFile(comment.file, comment.line);
 
       const body = `
@@ -175,12 +203,11 @@ ${comment.fixed_code || actualCode}
         pull_number: prNumber,
         commit_id: commitSha,
         path: comment.file,
-        line: comment.line,
-        side: "RIGHT",
+        position: patchPosition,
         body
       });
 
-      console.log(`💬 Posted inline comment on ${comment.file}:${comment.line}`);
+      console.log(`💬 Posted inline comment on ${comment.file}:${comment.line} (position: ${patchPosition})`);
     }
   } catch (err) {
     console.error("❌ Failed to post inline comments:", err.message);

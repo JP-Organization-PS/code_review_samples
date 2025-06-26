@@ -1,49 +1,59 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const parseDiff = require('parse-diff');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
 
-// === CONFIGURATION === //
 const model = process.env.AI_MODEL || 'gemini';
-
-// --- Azure OpenAI Settings --- //
 const azureKey = process.env.AZURE_OPENAI_KEY;
 const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-
-// --- Gemini Settings --- //
 const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
-// === GET GIT DIFF === //
-let diff = '';
-try {
-  const base = process.env.GITHUB_BASE_REF || 'main';
-  execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
-  diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
-  if (!diff.trim()) {
-    console.log("✅ No changes to review. Skipping AI code review.");
-    process.exit(0);
+// === Get Git Diff Between Last Two Commits === //
+async function getDiffFromLastTwoCommits() {
+  try {
+    const token = process.env.GITHUB_TOKEN;
+    const octokit = github.getOctokit(token);
+    const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+    const prNumber = github.context.payload.pull_request.number;
+
+    const commits = await octokit.rest.pulls.listCommits({
+      owner,
+      repo,
+      pull_number: prNumber
+    });
+
+    const commitCount = commits.data.length;
+    if (commitCount < 2) {
+      console.log("🔹 PR has only one commit, using HEAD~1 diff.");
+      return execSync(`git diff HEAD~1 HEAD`).toString();
+    } else {
+      const baseSha = commits.data[commitCount - 2].sha;
+      const headSha = commits.data[commitCount - 1].sha;
+      return execSync(`git diff ${baseSha} ${headSha}`).toString();
+    }
+  } catch (e) {
+    console.error("❌ Failed to get commit diff:", e.message);
+    process.exit(1);
   }
-} catch (e) {
-  console.error("❌ Failed to get git diff:", e.message);
-  process.exit(1);
 }
 
-// === PROMPT === //
-const prompt = `
+// === Prompt Template === //
+const promptTemplate = diff => `
 You are an expert software engineer. Review the following code diff and return only a valid JSON array of suggestions.
 
 STRICTLY return only the array in this format. Do not add any explanation or extra text.
 
 [
   {
-    "file": "relative/path/to/file.py",
-    "line": 2,
+    "file": "relative/path/to/file.js",
     "severity": "[MINOR]",
     "issue": "Brief description of the issue.",
     "suggestion": "What to improve or fix.",
+    "code": "The full original line from the diff",
     "fixed_code": "Improved or corrected version of the code line"
   }
 ]
@@ -54,9 +64,8 @@ ${diff}
 \`\`\`
 `;
 
-// === AI Clients === //
-async function runWithAzureOpenAI() {
-  console.log("🔷 Using Azure OpenAI...");
+// === Azure OpenAI === //
+async function runWithAzureOpenAI(prompt) {
   const res = await axios.post(
     `${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-03-01-preview`,
     {
@@ -74,12 +83,11 @@ async function runWithAzureOpenAI() {
       }
     }
   );
-
   return res.data.choices?.[0]?.message?.content?.trim() || "[]";
 }
 
-async function runWithGemini() {
-  console.log("🔶 Using Gemini...");
+// === Gemini === //
+async function runWithGemini(prompt) {
   const res = await axios.post(
     geminiEndpoint,
     {
@@ -101,56 +109,70 @@ async function runWithGemini() {
       }
     }
   );
-
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "[]";
 }
 
-// === Extract Clean JSON from LLM === //
+// === Extract JSON from LLM Response === //
 function extractJsonFromResponse(text) {
   const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (codeBlockMatch) return codeBlockMatch[1].trim();
-
   const start = text.indexOf('[');
   const end = text.lastIndexOf(']');
   if (start !== -1 && end !== -1 && end > start) {
     const sliced = text.substring(start, end + 1).trim();
     try {
-      JSON.parse(sliced); // validate
+      JSON.parse(sliced);
       return sliced;
     } catch {
       console.warn("⚠️ JSON slice looks malformed.");
     }
   }
-
   console.warn("⚠️ No valid JSON block found.");
   return "[]";
 }
 
-// === Get Actual Code Line From File === //
-function getLineFromFile(filePath, lineNumber) {
-  try {
-    const fullPath = path.resolve(process.env.GITHUB_WORKSPACE || '.', filePath);
-    const fileLines = fs.readFileSync(fullPath, 'utf-8').split('\n');
-    return fileLines[lineNumber - 1] || '';
-  } catch (err) {
-    console.warn(`⚠️ Could not read ${filePath}:${lineNumber} - ${err.message}`);
-    return '';
-  }
+// === Normalize Code Line (strip +/-, whitespace) === //
+function normalizeCode(code) {
+  return code.replace(/^[-+]/, '').trim();
 }
 
-// === Post Inline Comments === //
-async function postInlineComments(comments) {
+// === Post Inline Comments with Correct Position === //
+async function postInlineComments(comments, diff) {
   try {
     const token = process.env.GITHUB_TOKEN;
-    if (!token) throw new Error("GITHUB_TOKEN is not set.");
-
     const octokit = github.getOctokit(token);
     const [owner, repoName] = process.env.GITHUB_REPOSITORY.split('/');
     const prNumber = github.context.payload.pull_request.number;
     const commitSha = github.context.payload.pull_request.head.sha;
+    const prFiles = await octokit.rest.pulls.listFiles({ owner, repo: repoName, pull_number: prNumber });
+    const parsedDiff = parseDiff(diff);
 
     for (const comment of comments) {
-      const actualCode = getLineFromFile(comment.file, comment.line);
+      const prFile = prFiles.data.find(f => f.filename === comment.file);
+      const diffFile = parsedDiff.find(f => f.to === comment.file || f.from === comment.file);
+      if (!prFile || !diffFile) {
+        console.warn(`⚠️ Skipping comment, file not found in PR: ${comment.file}`);
+        continue;
+      }
+
+      let position = 0;
+      let foundPosition = null;
+
+      for (const chunk of diffFile.chunks) {
+        for (const change of chunk.changes) {
+          position++;
+          if (change.type === 'add' && normalizeCode(change.content) === normalizeCode(comment.code)) {
+            foundPosition = position;
+            break;
+          }
+        }
+        if (foundPosition) break;
+      }
+
+      if (!foundPosition) {
+        console.warn(`⚠️ Skipping: No matching added line for ${comment.file}`);
+        continue;
+      }
 
       const body = `
 **Issue:** ${comment.severity} ${comment.issue}
@@ -160,12 +182,12 @@ ${comment.suggestion}
 
 **Original Code:**
 \`\`\`js
-${actualCode}
+${comment.code || ''}
 \`\`\`
 
 **Rewritten Code:**
 \`\`\`js
-${comment.fixed_code || actualCode}
+${comment.fixed_code || ''}
 \`\`\`
 `;
 
@@ -175,12 +197,11 @@ ${comment.fixed_code || actualCode}
         pull_number: prNumber,
         commit_id: commitSha,
         path: comment.file,
-        line: comment.line,
-        side: "RIGHT",
+        position: foundPosition,
         body
       });
 
-      console.log(`💬 Posted inline comment on ${comment.file}:${comment.line}`);
+      console.log(`💬 Posted inline comment on ${comment.file} at position ${foundPosition}`);
     }
   } catch (err) {
     console.error("❌ Failed to post inline comments:", err.message);
@@ -188,24 +209,24 @@ ${comment.fixed_code || actualCode}
 }
 
 // === Main Logic === //
-async function reviewCode() {
+(async function reviewCode() {
   try {
-    let rawResponse = '';
+    const diff = await getDiffFromLastTwoCommits();
+    const prompt = promptTemplate(diff);
 
+    let rawResponse = '';
     if (model === 'azure') {
-      rawResponse = await runWithAzureOpenAI();
+      rawResponse = await runWithAzureOpenAI(prompt);
     } else if (model === 'gemini') {
-      rawResponse = await runWithGemini();
+      rawResponse = await runWithGemini(prompt);
     } else {
       throw new Error("Unsupported model: use 'azure' or 'gemini'");
     }
 
     console.log("\n🧠 Raw AI Response:\n", rawResponse);
-
     let comments = [];
     try {
       const cleanJson = extractJsonFromResponse(rawResponse);
-      console.log("🧪 Clean JSON:\n", cleanJson);
       comments = JSON.parse(cleanJson);
     } catch (err) {
       console.error("❌ Failed to parse AI response JSON:", err.message);
@@ -217,10 +238,8 @@ async function reviewCode() {
       return;
     }
 
-    await postInlineComments(comments);
+    await postInlineComments(comments, diff);
   } catch (err) {
     console.error("❌ Error during AI review:", err.message);
   }
-}
-
-reviewCode();
+})();

@@ -4,6 +4,7 @@ const path = require('path');
 const parseDiff = require('parse-diff');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
+const crypto = require('crypto');
 
 const model = process.env.AI_MODEL || 'gemini';
 const azureKey = process.env.AZURE_OPENAI_KEY;
@@ -49,10 +50,10 @@ STRICTLY return only the array in this format. Do not add any explanation or ext
 [
   {
     "file": "relative/path/to/file.py",
-    "line": 2,
     "severity": "[MINOR]",
     "issue": "Brief description of the issue.",
     "suggestion": "What to improve or fix.",
+    "code": "The full original line from the diff",
     "fixed_code": "Improved or corrected version of the code line"
   }
 ]
@@ -81,7 +82,6 @@ async function runWithAzureOpenAI(prompt) {
       }
     }
   );
-
   return res.data.choices?.[0]?.message?.content?.trim() || "[]";
 }
 
@@ -107,7 +107,6 @@ async function runWithGemini(prompt) {
       }
     }
   );
-
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "[]";
 }
 
@@ -132,7 +131,6 @@ function extractJsonFromResponse(text) {
 async function postInlineComments(comments, diff) {
   try {
     const token = process.env.GITHUB_TOKEN;
-    if (!token) throw new Error("GITHUB_TOKEN is not set.");
     const octokit = github.getOctokit(token);
     const [owner, repoName] = process.env.GITHUB_REPOSITORY.split('/');
     const prNumber = github.context.payload.pull_request.number;
@@ -150,7 +148,9 @@ async function postInlineComments(comments, diff) {
 
       let foundChange;
       for (const chunk of diffFile.chunks) {
-        const match = chunk.changes.find(c => c.ln === comment.line && c.type === 'add');
+        const match = chunk.changes.find(c =>
+          c.content.trim() === comment.code.trim() && c.type === 'add'
+        );
         if (match) {
           foundChange = match;
           break;
@@ -158,7 +158,7 @@ async function postInlineComments(comments, diff) {
       }
 
       if (!foundChange || !foundChange.position) {
-        console.warn(`⚠️ Skipping: No matching added line for ${comment.file}:${comment.line}`);
+        console.warn(`⚠️ Skipping: No matching added line for ${comment.file}`);
         continue;
       }
 

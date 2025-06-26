@@ -106,6 +106,20 @@ async function runWithGemini() {
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "[]";
 }
 
+// === Utility: Extract clean JSON from AI response === //
+function extractJsonFromResponse(text) {
+  const jsonBlock = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (jsonBlock) return jsonBlock[1].trim();
+
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start !== -1 && end !== -1 && end > start) {
+    return text.substring(start, end + 1).trim();
+  }
+
+  throw new Error("No valid JSON block found in AI response.");
+}
+
 // === Post Inline Comments === //
 async function postInlineComments(comments) {
   try {
@@ -168,12 +182,10 @@ async function reviewCode() {
 
     console.log("\n🧠 Raw AI Response:\n", rawResponse);
 
-    const jsonMatch = rawResponse.match(/```json([\s\S]*?)```/);
-    const jsonText = jsonMatch ? jsonMatch[1] : rawResponse;
-
     let comments = [];
     try {
-      comments = JSON.parse(jsonText);
+      const cleanJson = extractJsonFromResponse(rawResponse);
+      comments = JSON.parse(cleanJson);
     } catch (err) {
       console.error("❌ Failed to parse AI response JSON:", err.message);
       return;

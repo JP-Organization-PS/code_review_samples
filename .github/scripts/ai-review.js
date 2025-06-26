@@ -221,7 +221,7 @@ async function reviewCode() {
       return;
     }
 
-    await postInlineComments(comments);
+    // await postInlineComments(comments);
   } catch (err) {
     console.error("❌ Error during AI review:", err.message);
   }

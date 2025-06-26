@@ -13,7 +13,7 @@ def read_file(filepath):
 
 def calculate(x, y):
     if x == x:
-        return x + y
+        return x - y
 
 def do_work():
     result = 0

@@ -105,7 +105,6 @@ async function runWithGemini() {
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "[]";
 }
 
-// === Extract Clean JSON from LLM === //
 function extractJsonFromResponse(text) {
   const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (codeBlockMatch) return codeBlockMatch[1].trim();
@@ -115,7 +114,7 @@ function extractJsonFromResponse(text) {
   if (start !== -1 && end !== -1 && end > start) {
     const sliced = text.substring(start, end + 1).trim();
     try {
-      JSON.parse(sliced); // validate
+      JSON.parse(sliced);
       return sliced;
     } catch {
       console.warn("⚠️ JSON slice looks malformed.");
@@ -126,7 +125,6 @@ function extractJsonFromResponse(text) {
   return "[]";
 }
 
-// === Get Actual Code Line From File === //
 function getLineFromFile(filePath, lineNumber) {
   try {
     const fullPath = path.resolve(process.env.GITHUB_WORKSPACE || '.', filePath);
@@ -138,7 +136,6 @@ function getLineFromFile(filePath, lineNumber) {
   }
 }
 
-// === Post Inline Comments === //
 async function postInlineComments(comments) {
   try {
     const token = process.env.GITHUB_TOKEN;
@@ -149,7 +146,15 @@ async function postInlineComments(comments) {
     const prNumber = github.context.payload.pull_request.number;
     const commitSha = github.context.payload.pull_request.head.sha;
 
+    const files = await octokit.rest.pulls.listFiles({ owner, repo: repoName, pull_number: prNumber });
+
     for (const comment of comments) {
+      const prFile = files.data.find(f => f.filename === comment.file);
+      if (!prFile) {
+        console.warn(`⚠️ Skipping comment, file not found in PR: ${comment.file}`);
+        continue;
+      }
+
       const actualCode = getLineFromFile(comment.file, comment.line);
 
       const body = `
@@ -187,7 +192,6 @@ ${comment.fixed_code || actualCode}
   }
 }
 
-// === Main Logic === //
 async function reviewCode() {
   try {
     let rawResponse = '';

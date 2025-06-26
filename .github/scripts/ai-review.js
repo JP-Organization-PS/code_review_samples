@@ -3,7 +3,7 @@ const { execSync } = require('child_process');
 const github = require('@actions/github');
 
 // === CONFIGURATION === //
-const model = process.env.AI_MODEL || 'gemini'; // Options: 'gemini' or 'azure'
+const model = process.env.AI_MODEL || 'gemini';
 
 // --- Azure OpenAI Settings --- //
 const azureKey = process.env.AZURE_OPENAI_KEY;
@@ -12,7 +12,8 @@ const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
 
 // --- Gemini Settings --- //
 const geminiKey = process.env.GEMINI_API_KEY;
-const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
+const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${geminiKey}`;
+
 // === GET GIT DIFF === //
 let diff = '';
 try {
@@ -30,20 +31,24 @@ try {
 
 // === PROMPT === //
 const prompt = `
-You are an expert software engineer. Please review the following code diff and return suggestions in the following JSON format:
+You are an expert software engineer. Review the following code diff and provide JSON feedback with inline suggestions.
+
+Use this format:
 
 [
   {
-    "file": "relative/path/to/file.js",
-    "line": 42,
+    "file": "relative/path/to/file.py",
+    "line": 2,
     "severity": "[MINOR]",
-    "issue": "Unclear variable name.",
-    "suggestion": "Consider renaming the variable to 'userData'.",
-    "code": "let userData = fetchData();"
+    "issue": "Brief description of the issue.",
+    "suggestion": "What to improve or fix.",
+    "code": "Original code line from diff",
+    "fixed_code": "Improved or corrected version of the code line"
   }
 ]
 
-Only include issues relevant to lines in the diff.
+Return only valid JSON.
+
 Here is the code diff:
 \`\`\`diff
 ${diff}
@@ -119,8 +124,14 @@ async function postInlineComments(comments) {
 **Suggestion:**
 ${comment.suggestion}
 
+**Original Code:**
 \`\`\`js
 ${comment.code}
+\`\`\`
+
+**Rewritten Code:**
+\`\`\`js
+${comment.fixed_code || comment.code}
 \`\`\`
 `;
 
@@ -157,7 +168,6 @@ async function reviewCode() {
 
     console.log("\n🧠 Raw AI Response:\n", rawResponse);
 
-    // Try parsing JSON block
     const jsonMatch = rawResponse.match(/```json([\s\S]*?)```/);
     const jsonText = jsonMatch ? jsonMatch[1] : rawResponse;
 
@@ -170,7 +180,7 @@ async function reviewCode() {
     }
 
     if (comments.length === 0) {
-      console.log("ℹ️ No comments returned by the AI.");
+      console.log("ℹ️ No inline suggestions found.");
       return;
     }
 

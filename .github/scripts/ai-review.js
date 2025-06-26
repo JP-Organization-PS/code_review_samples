@@ -42,6 +42,7 @@ Your response should include:
 3. **Issues/Concerns** – Mention any bugs, anti-patterns, security concerns, or performance problems.
 4. **Suggestions** – Recommend improvements, better design patterns, or more idiomatic approaches.
 5. **Severity Tags** – Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion.
+6. **Line Reference and Snippet** – For each issue/suggestion, clearly mention the affected line number(s) and include the relevant code snippet for context.
 
 Respond in Markdown format to make it suitable for posting directly on GitHub PRs.
 

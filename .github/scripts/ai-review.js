@@ -1,6 +1,8 @@
 const axios = require('axios');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
+const fs = require('fs');
+const path = require('path');
 
 // === CONFIGURATION === //
 const model = process.env.AI_MODEL || 'gemini'; // Options: 'gemini' or 'azure'
@@ -49,8 +51,7 @@ Your JSON output must follow this structure:
       "file": "Relative path to file (e.g., .github/scripts/ai-review.js)",
       "line": "Line number(s) where the issue occurs",
       "code_snippet": "Relevant snippet of the affected code"
-    },
-    ...
+    }
   ]
 }
 
@@ -61,7 +62,6 @@ Here is the code diff:
 ${diff}
 \`\`\`
 `;
-
 
 // === AI Clients === //
 async function runWithAzureOpenAI() {
@@ -83,7 +83,6 @@ async function runWithAzureOpenAI() {
       }
     }
   );
-
   return res.data.choices?.[0]?.message?.content?.trim() || "No response from Azure OpenAI.";
 }
 
@@ -110,8 +109,30 @@ async function runWithGemini() {
       }
     }
   );
-
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
+}
+
+// === Helper to Find Snippet Line Range === //
+function matchSnippetInFile(filePath, codeSnippet) {
+  if (!fs.existsSync(filePath)) return null;
+
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n');
+  const snippetLines = codeSnippet.trim().split('\n').map(line => line.trim());
+
+  for (let i = 0; i <= lines.length - snippetLines.length; i++) {
+    let matched = true;
+    for (let j = 0; j < snippetLines.length; j++) {
+      if (lines[i + j].trim() !== snippetLines[j]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) {
+      return { start: i + 1, end: i + snippetLines.length };
+    }
+  }
+  return null;
 }
 
 // === Post PR Comment === //
@@ -161,9 +182,33 @@ async function reviewCode() {
     console.log("\n🔍 AI Code Review Output:\n");
     console.log(review);
 
-    if (process.env.GITHUB_TOKEN && process.env.GITHUB_REPOSITORY && process.env.GITHUB_REF) {
+    let parsed;
+    try {
+      parsed = JSON.parse(review);
+    } catch (err) {
+      console.error("❌ Failed to parse AI response as JSON. Posting raw review.");
       await postCommentToGitHubPR(review);
+      return;
     }
+
+    for (const issue of parsed.issues || []) {
+      const filePath = path.resolve(process.cwd(), issue.file);
+      const result = matchSnippetInFile(filePath, issue.code_snippet);
+      if (result) {
+        issue.matched_line_range = `${result.start}-${result.end}`;
+        console.log(`✅ Matched "${issue.title}" at ${issue.file}:${issue.matched_line_range}`);
+      } else {
+        issue.matched_line_range = null;
+        console.warn(`❌ Could not match snippet for "${issue.title}" in ${issue.file}`);
+      }
+    }
+
+    fs.writeFileSync('review_with_line_matches.json', JSON.stringify(parsed, null, 2));
+    console.log("📝 Saved review_with_line_matches.json");
+
+    // Post to PR
+    await postCommentToGitHubPR('```json\n' + JSON.stringify(parsed, null, 2) + '\n```');
+
   } catch (err) {
     console.error("❌ Error during AI review:", err.response?.data || err.message);
   }

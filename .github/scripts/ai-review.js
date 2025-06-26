@@ -13,20 +13,35 @@ const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
 let diff = '';
-try {
-  const base = process.env.GITHUB_BASE_REF || 'main';
-  execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
-  diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
-  if (!diff.trim()) {
-    console.log("✅ No changes to review. Skipping AI code review.");
-    process.exit(0);
+async function getDiffFromLastTwoCommits() {
+  try {
+    const token = process.env.GITHUB_TOKEN;
+    const octokit = github.getOctokit(token);
+    const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+    const prNumber = github.context.payload.pull_request.number;
+
+    const commits = await octokit.rest.pulls.listCommits({
+      owner,
+      repo,
+      pull_number: prNumber
+    });
+
+    const commitCount = commits.data.length;
+    if (commitCount < 2) {
+      console.log("🔹 PR has only one commit, using HEAD~1 diff.");
+      return execSync(`git diff HEAD~1 HEAD`).toString();
+    } else {
+      const baseSha = commits.data[commitCount - 2].sha;
+      const headSha = commits.data[commitCount - 1].sha;
+      return execSync(`git diff ${baseSha} ${headSha}`).toString();
+    }
+  } catch (e) {
+    console.error("❌ Failed to get commit diff:", e.message);
+    process.exit(1);
   }
-} catch (e) {
-  console.error("❌ Failed to get git diff:", e.message);
-  process.exit(1);
 }
 
-const prompt = `
+const promptTemplate = diff => `
 You are an expert software engineer. Review the following code diff and return only a valid JSON array of suggestions.
 
 STRICTLY return only the array in this format. Do not add any explanation or extra text.
@@ -48,7 +63,7 @@ ${diff}
 \`\`\`
 `;
 
-async function runWithAzureOpenAI() {
+async function runWithAzureOpenAI(prompt) {
   const res = await axios.post(
     `${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-03-01-preview`,
     {
@@ -70,7 +85,7 @@ async function runWithAzureOpenAI() {
   return res.data.choices?.[0]?.message?.content?.trim() || "[]";
 }
 
-async function runWithGemini() {
+async function runWithGemini(prompt) {
   const res = await axios.post(
     geminiEndpoint,
     {
@@ -114,7 +129,7 @@ function extractJsonFromResponse(text) {
   return "[]";
 }
 
-async function postInlineComments(comments) {
+async function postInlineComments(comments, diff) {
   try {
     const token = process.env.GITHUB_TOKEN;
     if (!token) throw new Error("GITHUB_TOKEN is not set.");
@@ -181,13 +196,16 @@ ${comment.fixed_code || ''}
   }
 }
 
-async function reviewCode() {
+(async function reviewCode() {
   try {
+    diff = await getDiffFromLastTwoCommits();
+    const prompt = promptTemplate(diff);
+
     let rawResponse = '';
     if (model === 'azure') {
-      rawResponse = await runWithAzureOpenAI();
+      rawResponse = await runWithAzureOpenAI(prompt);
     } else if (model === 'gemini') {
-      rawResponse = await runWithGemini();
+      rawResponse = await runWithGemini(prompt);
     } else {
       throw new Error("Unsupported model: use 'azure' or 'gemini'");
     }
@@ -207,10 +225,8 @@ async function reviewCode() {
       return;
     }
 
-    await postInlineComments(comments);
+    await postInlineComments(comments, diff);
   } catch (err) {
     console.error("❌ Error during AI review:", err.message);
   }
-}
-
-reviewCode();
+})();

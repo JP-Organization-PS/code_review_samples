@@ -5,7 +5,7 @@ const parseDiff = require('parse-diff');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
 
-const model = process.env.AI_MODEL || 'gemini';
+const model = process.env.AI_MODEL || 'azure';
 const azureKey = process.env.AZURE_OPENAI_KEY;
 const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;

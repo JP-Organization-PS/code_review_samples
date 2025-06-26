@@ -1,4 +1,6 @@
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
 
@@ -42,7 +44,6 @@ STRICTLY return only the array in this format. Do not add any explanation or ext
     "severity": "[MINOR]",
     "issue": "Brief description of the issue.",
     "suggestion": "What to improve or fix.",
-    "code": "Original code line from diff",
     "fixed_code": "Improved or corrected version of the code line"
   }
 ]
@@ -104,7 +105,7 @@ async function runWithGemini() {
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "[]";
 }
 
-// === JSON Extractor === //
+// === Extract Clean JSON from LLM === //
 function extractJsonFromResponse(text) {
   const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (codeBlockMatch) return codeBlockMatch[1].trim();
@@ -114,7 +115,7 @@ function extractJsonFromResponse(text) {
   if (start !== -1 && end !== -1 && end > start) {
     const sliced = text.substring(start, end + 1).trim();
     try {
-      JSON.parse(sliced); // test
+      JSON.parse(sliced); // validate
       return sliced;
     } catch {
       console.warn("⚠️ JSON slice looks malformed.");
@@ -123,6 +124,18 @@ function extractJsonFromResponse(text) {
 
   console.warn("⚠️ No valid JSON block found.");
   return "[]";
+}
+
+// === Get Actual Code Line From File === //
+function getLineFromFile(filePath, lineNumber) {
+  try {
+    const fullPath = path.resolve(process.env.GITHUB_WORKSPACE || '.', filePath);
+    const fileLines = fs.readFileSync(fullPath, 'utf-8').split('\n');
+    return fileLines[lineNumber - 1] || '';
+  } catch (err) {
+    console.warn(`⚠️ Could not read ${filePath}:${lineNumber} - ${err.message}`);
+    return '';
+  }
 }
 
 // === Post Inline Comments === //
@@ -137,6 +150,8 @@ async function postInlineComments(comments) {
     const commitSha = github.context.payload.pull_request.head.sha;
 
     for (const comment of comments) {
+      const actualCode = getLineFromFile(comment.file, comment.line);
+
       const body = `
 **Issue:** ${comment.severity} ${comment.issue}
 
@@ -145,12 +160,12 @@ ${comment.suggestion}
 
 **Original Code:**
 \`\`\`js
-${comment.code}
+${actualCode}
 \`\`\`
 
 **Rewritten Code:**
 \`\`\`js
-${comment.fixed_code || comment.code}
+${comment.fixed_code || actualCode}
 \`\`\`
 `;
 

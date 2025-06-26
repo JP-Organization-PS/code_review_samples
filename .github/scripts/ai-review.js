@@ -5,7 +5,7 @@ const parseDiff = require('parse-diff');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
 
-const model = process.env.AI_MODEL || 'azure';
+const model = process.env.AI_MODEL || 'gemini';
 const azureKey = process.env.AZURE_OPENAI_KEY;
 const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
@@ -49,7 +49,6 @@ ${diff}
 `;
 
 async function runWithAzureOpenAI() {
-  console.log("🔷 Using Azure OpenAI...");
   const res = await axios.post(
     `${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-03-01-preview`,
     {
@@ -72,7 +71,6 @@ async function runWithAzureOpenAI() {
 }
 
 async function runWithGemini() {
-  console.log("🔶 Using Gemini...");
   const res = await axios.post(
     geminiEndpoint,
     {
@@ -101,7 +99,6 @@ async function runWithGemini() {
 function extractJsonFromResponse(text) {
   const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (codeBlockMatch) return codeBlockMatch[1].trim();
-
   const start = text.indexOf('[');
   const end = text.lastIndexOf(']');
   if (start !== -1 && end !== -1 && end > start) {
@@ -113,32 +110,18 @@ function extractJsonFromResponse(text) {
       console.warn("⚠️ JSON slice looks malformed.");
     }
   }
-
   console.warn("⚠️ No valid JSON block found.");
   return "[]";
-}
-
-function getLineFromFile(filePath, lineNumber) {
-  try {
-    const fullPath = path.resolve(process.env.GITHUB_WORKSPACE || '.', filePath);
-    const fileLines = fs.readFileSync(fullPath, 'utf-8').split('\n');
-    return fileLines[lineNumber - 1] || '';
-  } catch (err) {
-    console.warn(`⚠️ Could not read ${filePath}:${lineNumber} - ${err.message}`);
-    return '';
-  }
 }
 
 async function postInlineComments(comments) {
   try {
     const token = process.env.GITHUB_TOKEN;
     if (!token) throw new Error("GITHUB_TOKEN is not set.");
-
     const octokit = github.getOctokit(token);
     const [owner, repoName] = process.env.GITHUB_REPOSITORY.split('/');
     const prNumber = github.context.payload.pull_request.number;
     const commitSha = github.context.payload.pull_request.head.sha;
-
     const prFiles = await octokit.rest.pulls.listFiles({ owner, repo: repoName, pull_number: prNumber });
     const parsedDiff = parseDiff(diff);
 
@@ -150,20 +133,19 @@ async function postInlineComments(comments) {
         continue;
       }
 
-      const matchingHunk = diffFile.chunks.find(chunk =>
-        chunk.changes.some(c => c.ln === comment.line && c.type === 'add')
-      );
-
-      const matchedLine = matchingHunk?.changes.find(c => c.ln === comment.line && c.type === 'add');
-      const position = matchedLine?.position;
-      const actualLine = matchedLine?.ln;
-
-      if (!actualLine || !position) {
-        console.warn(`⚠️ Skipping invalid line: ${comment.line} in ${comment.file}`);
-        continue;
+      let foundChange;
+      for (const chunk of diffFile.chunks) {
+        const match = chunk.changes.find(c => c.ln === comment.line && c.type === 'add');
+        if (match) {
+          foundChange = match;
+          break;
+        }
       }
 
-      const actualCode = getLineFromFile(comment.file, actualLine);
+      if (!foundChange || !foundChange.position) {
+        console.warn(`⚠️ Skipping: No matching added line for ${comment.file}:${comment.line}`);
+        continue;
+      }
 
       const body = `
 **Issue:** ${comment.severity} ${comment.issue}
@@ -173,12 +155,12 @@ ${comment.suggestion}
 
 **Original Code:**
 \`\`\`js
-${actualCode}
+${comment.code || ''}
 \`\`\`
 
 **Rewritten Code:**
 \`\`\`js
-${comment.fixed_code || actualCode}
+${comment.fixed_code || ''}
 \`\`\`
 `;
 
@@ -188,12 +170,11 @@ ${comment.fixed_code || actualCode}
         pull_number: prNumber,
         commit_id: commitSha,
         path: comment.file,
-        line: actualLine,
-        side: "RIGHT",
+        position: foundChange.position,
         body
       });
 
-      console.log(`💬 Posted inline comment on ${comment.file}:${actualLine}`);
+      console.log(`💬 Posted inline comment on ${comment.file} at position ${foundChange.position}`);
     }
   } catch (err) {
     console.error("❌ Failed to post inline comments:", err.message);
@@ -212,11 +193,9 @@ async function reviewCode() {
     }
 
     console.log("\n🧠 Raw AI Response:\n", rawResponse);
-
     let comments = [];
     try {
       const cleanJson = extractJsonFromResponse(rawResponse);
-      console.log("🧪 Clean JSON:\n", cleanJson);
       comments = JSON.parse(cleanJson);
     } catch (err) {
       console.error("❌ Failed to parse AI response JSON:", err.message);
@@ -228,7 +207,7 @@ async function reviewCode() {
       return;
     }
 
-    // await postInlineComments(comments);
+    await postInlineComments(comments);
   } catch (err) {
     console.error("❌ Error during AI review:", err.message);
   }

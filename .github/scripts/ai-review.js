@@ -16,16 +16,11 @@ const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
 const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
-// === GET GIT DIFF for Last N Commits in PR Branch === //
 // === GET GIT DIFF: PR-safe and accurate === //
 let diff = '';
 try {
   const base = process.env.GITHUB_BASE_REF || 'main';
-
-  // Ensure base branch is available
   execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
-
-  // Get diff of all changes introduced by PR branch vs base
   diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
 
   if (!diff.trim()) {
@@ -39,32 +34,9 @@ try {
   process.exit(1);
 }
 
-
 // === PROMPT === //
 const prompt = `
-You are an expert software engineer and code reviewer specializing in clean code, security, performance, and maintainability.
-
-Please review the following code diff and respond in **strict JSON format**.
-
-Your JSON output must follow this structure:
-
-{
-  "overall_summary": "Brief summary of the changes and your general impression.",
-  "positive_aspects": ["List of good practices observed."],
-  "issues": [
-    {
-      "severity": "[INFO|MINOR|MAJOR|CRITICAL]",
-      "title": "Short title or label of the issue",
-      "description": "Detailed explanation of the issue or concern.",
-      "suggestion": "Proposed fix or recommendation.",
-      "file": "Relative path to file (e.g., .github/scripts/ai-review.js)",
-      "line": "Line number(s) where the issue occurs",
-      "code_snippet": "Relevant snippet of the affected code"
-    }
-  ]
-}
-
-Respond with only a single valid JSON object. No Markdown, headers, or commentary.
+You are an expert software engineer and code reviewer...
 
 Here is the code diff:
 \`\`\`diff
@@ -188,42 +160,33 @@ async function reviewCode() {
       throw new Error("Unsupported model: use 'azure' or 'gemini'");
     }
 
-    console.log("
-🔍 AI Code Review Output:
-");
+    console.log(`\n🔍 AI Code Review Output:\n`);
     console.log(review);
 
-    // 🧼 Sanitize response: remove markdown fences
     const cleaned = review
       .replace(/```json/g, '')
       .replace(/```/g, '')
       .trim();
 
-    console.log("
-🔍 Cleaned JSON Output:
-");
+    console.log(`\n🔍 Cleaned JSON Output:\n`);
     console.log(cleaned);
 
-    let parsed;
-    parsed = JSON.parse(cleaned);
+    const parsed = JSON.parse(cleaned);
 
     for (const issue of parsed.issues || []) {
-      console.log("
-🔍 Parsed Issues:
-");
+      console.log(`\n🔍 Parsed Issues:\n`);
       console.log(issue);
       const filePath = path.resolve(process.cwd(), issue.file);
       const result = matchSnippetInFile(filePath, issue.code_snippet);
       if (result) {
         issue.matched_line_range = `${result.start}-${result.end}`;
-        console.log(`✅ Matched \"${issue.title}\" at ${issue.file}:${issue.matched_line_range}`);
+        console.log(`✅ Matched "${issue.title}" at ${issue.file}:${issue.matched_line_range}`);
       } else {
         issue.matched_line_range = null;
-        console.warn(`❌ Could not match snippet for \"${issue.title}\" in ${issue.file}`);
+        console.warn(`❌ Could not match snippet for "${issue.title}" in ${issue.file}`);
       }
     }
 
-    // Post the cleaned review as a comment to the GitHub PR
     await postCommentToGitHubPR(cleaned);
 
   } catch (err) {

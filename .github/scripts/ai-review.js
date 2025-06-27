@@ -173,7 +173,7 @@ if ((parsed.issues || []).length > 0) {
   summaryComment += `
 
 <details>
-<summary>⚠️ <strong>Detected Issues (${parsed.issues.length})</strong> — Click to expand</summary>\n\n`;
+<summary>⚠️ <strong>Detected Issues (${parsed.issues.length})</strong> — Click to expand</summary><br>\n\n`;
 
   for (const issue of parsed.issues) {
     let severityEmoji = '🟢';

@@ -160,8 +160,8 @@ async function reviewCode() {
     const prNumber = match?.[1];
     const commitId = github.context.payload.pull_request.head.sha;
 
-    // === 📝 Post Summary Comment First ===
-    let summaryComment = `### 🔍 AI Code Review Summary
+// === 📝 Post Summary Comment First ===
+let summaryComment = `### 🔍 AI Code Review Summary
 
 **📝 Overall Summary:**  
 ${parsed.overall_summary}
@@ -169,19 +169,26 @@ ${parsed.overall_summary}
 **✅ Positive Aspects:**  
 ${parsed.positive_aspects.map(p => `- ${p}`).join('\n')}`;
 
-    if ((parsed.issues || []).length > 0) {
-      summaryComment += `
+if ((parsed.issues || []).length > 0) {
+  summaryComment += `
 
-**⚠️ Detected Issues (${parsed.issues.length}):**`;
-      for (const issue of parsed.issues) {
-        summaryComment += `
+<details>
+<summary>⚠️ Detected Issues (${parsed.issues.length}) — Click to expand</summary>
 
----  
+`;
+
+  for (const issue of parsed.issues) {
+    summaryComment += `---  
 **${issue.title}** (${issue.severity})  
 ${issue.description}  
-*Suggestion:* ${issue.suggestion}`;
-      }
-    }
+*Suggestion:* ${issue.suggestion}
+
+`;
+  }
+
+  summaryComment += `</details>`;
+}
+
 
     await octokit.rest.pulls.createReview({
       owner,

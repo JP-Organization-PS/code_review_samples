@@ -93,7 +93,11 @@ function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
   if (!fs.existsSync(filePath)) return null;
 
   const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-  const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());
+  const snippetLines = codeSnippet
+    .trim()
+    .split('\n')
+    .map(line => line.replace(/^[-+]\s*/, '').trim()) // Strip leading '+' or '-' and whitespace
+    .filter(line => line.length > 0); // Ignore empty lines
 
   // First: Try exact match
   for (let i = 0; i <= lines.length - snippetLines.length; i++) {

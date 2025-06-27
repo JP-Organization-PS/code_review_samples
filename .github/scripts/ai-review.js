@@ -51,7 +51,7 @@ CRITICAL INSTRUCTIONS - FOLLOW EXACTLY:
 JSON RESPONSE FORMAT:
 {
   "overall_summary": "A brief summary of the change and your general impression.",
-  "highlights": ["Highlight any good practices or improvements made."],
+  "highlights": [Highlight any good practices or improvements made.],
   "issues": [
     {
       "severity": "Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion.",
@@ -75,6 +75,25 @@ Here is the code diff:
 ${diff}`;
 }
 
+function normalizeCodeSnippet(diffSnippet) {
+  return diffSnippet
+    .split('\n')
+    .filter(line =>
+      !line.startsWith('diff') &&
+      !line.startsWith('index') &&
+      !line.startsWith('---') &&
+      !line.startsWith('+++') &&
+      !line.startsWith('@@')
+    )
+    .map(line => {
+      if (line.startsWith('+') || line.startsWith('-')) {
+        return line.slice(1);
+      }
+      return line;
+    })
+    .join('\n')
+    .trim();
+}
 
 async function requestAzure(prompt) {
   console.log("Using Azure OpenAI...");
@@ -121,13 +140,12 @@ async function requestGemini(prompt) {
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
 }
 
-
-
 function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
+  const normalizedSnippet = normalizeCodeSnippet(codeSnippet);
   if (!fs.existsSync(filePath)) return null;
 
   const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-  const snippetLines = codeSnippet
+  const snippetLines = normalizedSnippet
     .trim()
     .split('\n')
     .map(line => line.replace(/^[-+]\s*/, '').trim()) // Strip leading '+' or '-' and whitespace

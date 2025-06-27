@@ -41,7 +41,7 @@ function buildPrompt(diff) {
 
 Please review the following code diff and respond in strict JSON format.
 
-CRITICAL INSTRUCTIONS – FOLLOW EXACTLY:
+CRITICAL INSTRUCTIONS - FOLLOW EXACTLY:
 - DO NOT rewrite, reformat, or modify code snippets.
 - DO NOT add, remove, or alter any lines of code (including try/except blocks, print/log statements, or comments).
 - DO NOT infer missing logic or auto-complete partial functions.
@@ -96,30 +96,31 @@ async function requestAzure(prompt) {
 
 async function requestGemini(prompt) {
   console.log("Using Gemini...");
+  const systemInstruction = `You are a precise code reviewer. NEVER modify or improve code snippets from the user. The code_snippet field must be an exact copy of the original code diff. DO NOT add, remove, reformat, or auto-correct code snippets.`;
+
   const res = await axios.post(
     CONFIG.gemini.endpoint,
     {
       contents: [
         {
-          role: 'system',
-          parts: [
-            {
-              text: 'You are a precise code reviewer. NEVER modify or improve code snippets from the user. The code_snippet field must be an exact copy of the original code diff. DO NOT add, remove, reformat, or auto-correct code snippets.'
-            }
-          ]
-        },
-        {
           role: 'user',
-          parts: [{ text: prompt }]
+          parts: [{ text: `${systemInstruction}\n\n${prompt}` }]
         }
       ],
-      generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: 8192 }
+      generationConfig: {
+        temperature: 0.1,
+        topP: 0.9,
+        maxOutputTokens: 8192
+      }
     },
-    { headers: { 'Content-Type': 'application/json' } }
+    {
+      headers: { 'Content-Type': 'application/json' }
+    }
   );
 
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
 }
+
 
 
 function matchSnippet(filePath, codeSnippet, threshold = 0.85) {

@@ -173,24 +173,36 @@ if ((parsed.issues || []).length > 0) {
   summaryComment += `
 
 <details>
-<summary>⚠️ Detected Issues (${parsed.issues.length}) — Click to expand</summary>\n`;
+<summary>⚠️ <strong>Detected Issues (${parsed.issues.length})</strong> — Click to expand</summary>\n\n`;
 
   for (const issue of parsed.issues) {
+    let severityEmoji = '🟢';
+    if (issue.severity === 'MAJOR' || issue.severity === 'CRITICAL') severityEmoji = '🔴';
+    else if (issue.severity === 'MINOR') severityEmoji = '🟠';
+    else if (issue.severity === 'INFO') severityEmoji = '🔵';
+
     summaryComment += `
 <details>
-<summary><strong>${issue.title}</strong> (${issue.severity})</summary>
+<summary><strong>${severityEmoji} ${issue.title}</strong> <em>(${issue.severity})</em></summary>
 
-**Description:**  
+**📁 File:** \`${issue.file}\`  
+**🔢 Line:** ${issue.line || 'N/A'}
+
+---
+
+**📝 Description:**  
 ${issue.description}
 
-**Suggestion:**  
+**💡 Suggestion:**  
 ${issue.suggestion}
+
 </details>
 `;
   }
 
-  summaryComment += `</details>`;
+  summaryComment += `\n</details>\n`;
 }
+
 
 
     await octokit.rest.pulls.createReview({

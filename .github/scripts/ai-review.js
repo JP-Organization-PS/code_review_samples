@@ -51,7 +51,7 @@ VERY IMPORTANT:
 Your JSON output must follow this format:
 { "overall_summary": "...", "positive_aspects": ["..."], "issues": [{ "severity": "...", "title": "...", "description": "...", "suggestion": "...", "file": "...", "line": "...", "code_snippet": "..." }] }
 
-Respond with only a single valid JSON object. No Markdown, headers, or commentary.
+Respond with only a single valid JSON object. Do not include Markdown, code blocks, backticks, or formatting.
 
 Here is the code diff:
 
@@ -149,7 +149,13 @@ async function reviewCode() {
   const prompt = buildPrompt(diff);
   const review = CONFIG.model === 'azure' ? await requestAzure(prompt) : await requestGemini(prompt);
 
-  const parsed = JSON.parse(review.replace(/```json|```/g, '').trim());
+  const cleaned = review
+  .replace(/```json/g, '')
+  .replace(/```/g, '')
+  .replace(/\\`/g, '`')
+  .trim();
+
+  const parsed = JSON.parse(cleaned);
   const { overall_summary, positive_aspects, issues = [] } = parsed;
 
   const octokit = github.getOctokit(process.env.GITHUB_TOKEN);

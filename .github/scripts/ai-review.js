@@ -119,7 +119,7 @@ function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
     }
   }
 
-  console.warn(`No match found for snippet:\n${codeSnippet}`);
+  console.warn(`No match found for the code snippet:\n${codeSnippet}`);
   return null;
 }
 

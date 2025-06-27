@@ -5,6 +5,7 @@ const github = require('@actions/github');
 const fs = require('fs');
 const path = require('path');
 const stringSimilarity = require('string-similarity');
+const parseDiff = require('parse-diff');
 
 const CONFIG = {
   model: process.env.AI_MODEL || 'gemini',
@@ -23,7 +24,7 @@ function getGitDiff() {
   try {
     const base = process.env.GITHUB_BASE_REF || 'main';
     execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
-    const diff = execSync(`git diff --unified=0 origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
+    const diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
     if (!diff.trim()) {
       console.log("No changes found in PR. Skipping AI review.");
       process.exit(0);
@@ -77,26 +78,6 @@ Here is the code diff:
 ${diff}`;
 }
 
-function normalizeCodeSnippet(diffSnippet) {
-  return diffSnippet
-    .split('\n')
-    .filter(line =>
-      !line.startsWith('diff') &&
-      !line.startsWith('index') &&
-      !line.startsWith('---') &&
-      !line.startsWith('+++') &&
-      !line.startsWith('@@')
-    )
-    .map(line => {
-      if (line.startsWith('+') || line.startsWith('-')) {
-        return line.slice(1);
-      }
-      return line;
-    })
-    .join('\n')
-    .trim();
-}
-
 async function requestAzure(prompt) {
   console.log("Using Azure OpenAI...");
   const { endpoint, deployment, key } = CONFIG.azure;
@@ -142,58 +123,50 @@ async function requestGemini(prompt) {
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
 }
 
-function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
-  if (!fs.existsSync(filePath)) return null;
-
-  const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-  const snippetLines = codeSnippet.trim().split('\n').map(line => line.trim());
-
-  // First: Try exact match
-  for (let i = 0; i <= lines.length - snippetLines.length; i++) {
-    const window = lines.slice(i, i + snippetLines.length).map(l => l.trim());
-    const exactMatch = snippetLines.every((line, j) => window[j] === line);
-    if (exactMatch) {
-      console.log(`Matched using exact logic at line ${i + 1}`);
-      return { start: i + 1, end: i + snippetLines.length };
-    }
+function matchSnippet(diff, filePath, codeSnippet, threshold = 0.85) {
+  const files = parseDiff(diff);
+  const file = files.find(f => f.to === filePath || f.from === filePath);
+  if (!file) {
+    console.warn(`File ${filePath} not found in diff.`);
+    return null;
   }
 
-  // Fallback: Try fuzzy matching
-  for (let i = 0; i <= lines.length - snippetLines.length; i++) {
-    const window = lines.slice(i, i + snippetLines.length).map(l => l.trim());
-    const similarity = snippetLines.map((line, j) =>
-      stringSimilarity.compareTwoStrings(line, window[j])
-    );
-    const average = similarity.reduce((a, b) => a + b, 0) / similarity.length;
+  const snippetLines = codeSnippet
+    .trim()
+    .split('\n')
+    .map(line => line.trim());
 
-    if (average >= threshold) {
-      console.log(`Matched using fuzzy logic (score: ${average.toFixed(2)}) at line ${i + 1}`);
-      return { start: i + 1, end: i + snippetLines.length };
-    }
-  }
+  for (const chunk of file.chunks) {
+    const changes = chunk.changes;
 
-  console.warn(`No match found for the code snippet:\n${codeSnippet}`);
-  return null;
-}
+    for (let i = 0; i <= changes.length - snippetLines.length; i++) {
+      const window = changes.slice(i, i + snippetLines.length);
+      const windowLines = window.map(c => c.content.replace(/^[-+]/, '').trim());
 
+      const exactMatch = snippetLines.every((line, j) => windowLines[j] === line);
+      if (exactMatch) {
+        const firstLine = window.find(w => w.ln2 !== undefined || w.ln !== undefined);
+        const lineNumber = firstLine?.ln2 || firstLine?.ln || null;
+        console.log(`✅ Exact match at ${filePath}:${lineNumber}`);
+        return { file: filePath, start: lineNumber, end: lineNumber + snippetLines.length - 1 };
+      }
 
-function matchSnippet_old(filePath, codeSnippet) {
-  if (!fs.existsSync(filePath)) return null;
-  const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-  const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());
+      const similarityScores = snippetLines.map((line, j) =>
+        stringSimilarity.compareTwoStrings(line, windowLines[j] || '')
+      );
+      const avgSimilarity = similarityScores.reduce((a, b) => a + b, 0) / similarityScores.length;
 
-  for (let i = 0; i <= lines.length - snippetLines.length; i++) {
-    let matched = true;
-    for (let j = 0; j < snippetLines.length; j++) {
-      if (!lines[i + j].includes(snippetLines[j])) {
-        matched = false;
-        break;
+      if (avgSimilarity >= threshold) {
+        const firstLine = window.find(w => w.ln2 !== undefined || w.ln !== undefined);
+        const lineNumber = firstLine?.ln2 || firstLine?.ln || null;
+        console.log(`🤏 Fuzzy match (${avgSimilarity.toFixed(2)}) at ${filePath}:${lineNumber}`);
+        return { file: filePath, start: lineNumber, end: lineNumber + snippetLines.length - 1 };
       }
     }
-    if (matched) {
-      return { start: i + 1, end: i + snippetLines.length };
-    }
   }
+
+  console.warn(`❌ No match found for snippet in ${filePath}:
+${codeSnippet}`);
   return null;
 }
 
@@ -203,10 +176,10 @@ async function reviewCode() {
   const review = CONFIG.model === 'azure' ? await requestAzure(prompt) : await requestGemini(prompt);
 
   const cleaned = review
-  .replace(/```json/g, '')
-  .replace(/```/g, '')
-  .replace(/\\`/g, '`')
-  .trim();
+    .replace(/```json/g, '')
+    .replace(/```/g, '')
+    .replace(/\\`/g, '`')
+    .trim();
 
   const parsed = JSON.parse(cleaned);
   const { overall_summary, highlights, issues = [] } = parsed;
@@ -220,24 +193,25 @@ async function reviewCode() {
 
   if (issues.length) {
     summary += `\n\n<details>\n<summary>⚠️ <strong>Detected Issues (${issues.length})</strong> — Click to expand</summary><br>\n`;
-  for (const issue of issues) {
-    let emoji = '🟢';
-    let severityLabel = 'Low Priority';
+    for (const issue of issues) {
+      let emoji = '🟢';
+      let severityLabel = 'Low Priority';
 
-    if (issue.severity === 'CRITICAL') {
-      emoji = '🔴';
-      severityLabel = 'Critical Priority';
-    } else if (issue.severity === 'MAJOR') {
-      emoji = '🔴';
-      severityLabel = 'High Priority';
-    } else if (issue.severity === 'MINOR') {
-      emoji = '🟠';
-      severityLabel = 'Medium Priority';
-    } else if (issue.severity === 'INFO') {
-      emoji = '🔵';
-      severityLabel = 'Informational';
-    }
-    summary += `
+      if (issue.severity === 'CRITICAL') {
+        emoji = '🔴';
+        severityLabel = 'Critical Priority';
+      } else if (issue.severity === 'MAJOR') {
+        emoji = '🔴';
+        severityLabel = 'High Priority';
+      } else if (issue.severity === 'MINOR') {
+        emoji = '🟠';
+        severityLabel = 'Medium Priority';
+      } else if (issue.severity === 'INFO') {
+        emoji = '🔵';
+        severityLabel = 'Informational';
+      }
+
+      summary += `
 - <details>
   <summary><strong>${emoji} ${issue.title}</strong> <em>(${severityLabel})</em></summary>
 
@@ -265,10 +239,9 @@ async function reviewCode() {
   console.log(`Posted summary comment.`);
 
   for (const issue of issues) {
-    const normalizedSnippet = normalizeCodeSnippet(issue.code_snippet);
-    const result = matchSnippet(path.resolve(process.cwd(), issue.file), normalizedSnippet);
+    const result = matchSnippet(diff, issue.file, issue.code_snippet);
     if (!result) {
-      console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file} Snippet: ${normalizedSnippet}`);
+      console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file}`);
       continue;
     }
 

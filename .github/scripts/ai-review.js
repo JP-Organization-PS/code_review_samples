@@ -36,7 +36,29 @@ try {
 
 // === PROMPT === //
 const prompt = `
-You are an expert software engineer and code reviewer...
+You are an expert software engineer and code reviewer specializing in clean code, security, performance, and maintainability.
+
+Please review the following code diff and respond in **strict JSON format**.
+
+Your JSON output must follow this structure:
+
+{
+  "overall_summary": "Brief summary of the changes and your general impression.",
+  "positive_aspects": ["List of good practices observed."],
+  "issues": [
+    {
+      "severity": "[INFO|MINOR|MAJOR|CRITICAL]",
+      "title": "Short title or label of the issue",
+      "description": "Detailed explanation of the issue or concern.",
+      "suggestion": "Proposed fix or recommendation.",
+      "file": "Relative path to file (e.g., .github/scripts/ai-review.js)",
+      "line": "Line number(s) where the issue occurs",
+      "code_snippet": "Relevant snippet of the affected code"
+    }
+  ]
+}
+
+Respond with only a single valid JSON object. No Markdown, headers, or commentary.
 
 Here is the code diff:
 \`\`\`diff
@@ -134,11 +156,13 @@ async function postCommentToGitHubPR(reviewText) {
 
     if (!prNumber) throw new Error("Cannot determine PR number from GITHUB_REF.");
 
+    const body = `### 🤖 Gemini AI Code Review\n\n**Summary:**\n\n\`\`\`\n${reviewText}\n\`\`\``;
+
     await octokit.rest.issues.createComment({
       owner,
       repo: repoName,
       issue_number: prNumber,
-      body: reviewText
+      body
     });
 
     console.log(`✅ Posted AI review as PR comment on #${prNumber}`);
@@ -160,7 +184,7 @@ async function reviewCode() {
       throw new Error("Unsupported model: use 'azure' or 'gemini'");
     }
 
-    console.log(`\n🔍 AI Code Review Output:\n`);
+    console.log("\n🔍 AI Code Review Output:\n");
     console.log(review);
 
     const cleaned = review
@@ -168,22 +192,22 @@ async function reviewCode() {
       .replace(/```/g, '')
       .trim();
 
-    console.log(`\n🔍 Cleaned JSON Output:\n`);
+    console.log("\n🔍 Cleaned JSON Output:\n");
     console.log(cleaned);
 
-    const parsed = JSON.parse(cleaned);
+    let parsed = JSON.parse(cleaned);
 
     for (const issue of parsed.issues || []) {
-      console.log(`\n🔍 Parsed Issues:\n`);
+      console.log("\n🔍 Parsed Issues:\n");
       console.log(issue);
       const filePath = path.resolve(process.cwd(), issue.file);
       const result = matchSnippetInFile(filePath, issue.code_snippet);
       if (result) {
         issue.matched_line_range = `${result.start}-${result.end}`;
-        console.log(`✅ Matched "${issue.title}" at ${issue.file}:${issue.matched_line_range}`);
+        console.log(`✅ Matched \"${issue.title}\" at ${issue.file}:${issue.matched_line_range}`);
       } else {
         issue.matched_line_range = null;
-        console.warn(`❌ Could not match snippet for "${issue.title}" in ${issue.file}`);
+        console.warn(`❌ Could not match snippet for \"${issue.title}\" in ${issue.file}`);
       }
     }
 

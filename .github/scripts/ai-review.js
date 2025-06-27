@@ -182,7 +182,7 @@ if ((parsed.issues || []).length > 0) {
     else if (issue.severity === 'INFO') severityEmoji = '🔵';
 
     summaryComment += `
-<details>
+&nbsp;&nbsp;&nbsp;<details>
 <summary><strong>${severityEmoji} ${issue.title}</strong> <em>(${issue.severity})</em></summary>
 
 **📁 File:** \`${issue.file}\`  
@@ -202,6 +202,7 @@ ${issue.suggestion}
 
   summaryComment += `\n</details>\n`;
 }
+
 
 
 

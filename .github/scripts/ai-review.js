@@ -50,7 +50,7 @@ ${diff}`;
 }
 
 async function requestAzure(prompt) {
-  console.log("🔷 Using Azure OpenAI...");
+  console.log("Using Azure OpenAI...");
   const { endpoint, deployment, key } = CONFIG.azure;
   const res = await axios.post(
     `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=2024-03-01-preview`,
@@ -68,7 +68,7 @@ async function requestAzure(prompt) {
 }
 
 async function requestGemini(prompt) {
-  console.log("🔶 Using Gemini...");
+  console.log("Using Gemini...");
   const res = await axios.post(
     CONFIG.gemini.endpoint,
     {
@@ -141,7 +141,10 @@ async function reviewCode() {
 
   for (const issue of issues) {
     const result = matchSnippet(path.resolve(process.cwd(), issue.file), issue.code_snippet);
-    if (!result) continue;
+    if (!result) {
+      console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file}`);
+      continue;
+    }
 
     const priority = issue.severity === 'CRITICAL' || issue.severity === 'MAJOR'
       ? '🔴 High Priority'
@@ -163,7 +166,7 @@ async function reviewCode() {
       side: 'RIGHT',
       body,
     });
-    console.log(`💬 Posted inline comment: ${issue.title}`);
+    console.log(`Posted inline comment: ${issue.title}`);
   }
 }
 

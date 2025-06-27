@@ -23,7 +23,7 @@ jobs:
           node-version: 18
 
       - name: Install dependencies
-        run: npm install axios @actions/github parse-diff
+        run: npm install axios @actions/github parse-diff string-similarity
 
       - name: Run AI Code Review
         run: node .github/scripts/ai-review.js

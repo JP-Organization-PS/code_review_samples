@@ -40,8 +40,6 @@ try {
 }
 
 
-
-
 // === PROMPT === //
 const prompt = `
 You are an expert software engineer and code reviewer specializing in clean code, security, performance, and maintainability.
@@ -190,34 +188,43 @@ async function reviewCode() {
       throw new Error("Unsupported model: use 'azure' or 'gemini'");
     }
 
-    console.log("\n🔍 AI Code Review Output:\n");
+    console.log("
+🔍 AI Code Review Output:
+");
     console.log(review);
 
     // 🧼 Sanitize response: remove markdown fences
     const cleaned = review
-    .replace(/```json/g, '')
-    .replace(/```/g, '')
-    .trim();
+      .replace(/```json/g, '')
+      .replace(/```/g, '')
+      .trim();
 
-    console.log("\n🔍 Cleaned JSON Output:\n");
+    console.log("
+🔍 Cleaned JSON Output:
+");
     console.log(cleaned);
 
     let parsed;
     parsed = JSON.parse(cleaned);
 
     for (const issue of parsed.issues || []) {
-      console.log("\n🔍 Parsed Issues:\n");
+      console.log("
+🔍 Parsed Issues:
+");
       console.log(issue);
       const filePath = path.resolve(process.cwd(), issue.file);
       const result = matchSnippetInFile(filePath, issue.code_snippet);
       if (result) {
         issue.matched_line_range = `${result.start}-${result.end}`;
-        console.log(`✅ Matched "${issue.title}" at ${issue.file}:${issue.matched_line_range}`);
+        console.log(`✅ Matched \"${issue.title}\" at ${issue.file}:${issue.matched_line_range}`);
       } else {
         issue.matched_line_range = null;
-        console.warn(`❌ Could not match snippet for "${issue.title}" in ${issue.file}`);
+        console.warn(`❌ Could not match snippet for \"${issue.title}\" in ${issue.file}`);
       }
     }
+
+    // Post the cleaned review as a comment to the GitHub PR
+    await postCommentToGitHubPR(cleaned);
 
   } catch (err) {
     console.error("❌ Error during AI review:", err.response?.data || err.message);

@@ -35,9 +35,10 @@ try {
 }
 
 // === PROMPT === //
-const prompt = `You are an expert software engineer and code reviewer specializing in clean code, security, performance, and maintainability.
+const prompt = `
+You are an expert software engineer and code reviewer specializing in clean code, security, performance, and maintainability.
 
-Please review the following code diff and respond in **strict JSON format**.
+Please review the following code diff and respond in strict JSON format.
 
 Your JSON output must follow this structure:
 
@@ -60,7 +61,9 @@ Your JSON output must follow this structure:
 Respond with only a single valid JSON object. No Markdown, headers, or commentary.
 
 Here is the code diff:
-\`\`\`diff\n${diff}\n\`\`\``;
+
+${diff}
+`;
 
 // === AI Clients === //
 async function runWithAzureOpenAI() {
@@ -183,14 +186,15 @@ async function reviewCode() {
 
     for (const issue of parsed.issues || []) {
       if (!issue.matched_line) continue;
-      let severityLabel = '🟢 LOW';
-if (issue.severity === 'CRITICAL' || issue.severity === 'MAJOR') {
-  severityLabel = '🔴 HIGH';
-} else if (issue.severity === 'MINOR') {
-  severityLabel = '🟠 MEDIUM';
-}
 
-const body = `### 🤖 ${issue.title}
+      let severityLabel = '🟢 LOW';
+      if (issue.severity === 'CRITICAL' || issue.severity === 'MAJOR') {
+        severityLabel = '🔴 HIGH';
+      } else if (issue.severity === 'MINOR') {
+        severityLabel = '🟠 MEDIUM';
+      }
+
+      const body = `### 🤖 ${issue.title}
 
 **Severity:** ${severityLabel}  
 **Description:**  

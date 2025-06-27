@@ -86,12 +86,20 @@ function matchSnippet(filePath, codeSnippet) {
   const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());
 
   for (let i = 0; i <= lines.length - snippetLines.length; i++) {
-    if (snippetLines.every((line, j) => lines[i + j].trim() === line)) {
+    let matched = true;
+    for (let j = 0; j < snippetLines.length; j++) {
+      if (!lines[i + j].includes(snippetLines[j])) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) {
       return { start: i + 1, end: i + snippetLines.length };
     }
   }
   return null;
 }
+
 
 async function reviewCode() {
   const diff = getGitDiff();
@@ -137,7 +145,7 @@ async function reviewCode() {
     event: 'COMMENT',
     body: summary,
   });
-  console.log(`💬 Posted summary comment.`);
+  console.log(`Posted summary comment.`);
 
   for (const issue of issues) {
     const result = matchSnippet(path.resolve(process.cwd(), issue.file), issue.code_snippet);

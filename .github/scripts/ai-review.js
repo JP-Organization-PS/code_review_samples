@@ -187,21 +187,19 @@ async function reviewCode() {
     for (const issue of parsed.issues || []) {
       if (!issue.matched_line) continue;
 
-      let severityLabel = '🟢 LOW';
+      let severityLabel = '🟢 Low Priority';
       if (issue.severity === 'CRITICAL' || issue.severity === 'MAJOR') {
-        severityLabel = '🔴 HIGH';
+        severityLabel = '🔴 High Priority';
       } else if (issue.severity === 'MINOR') {
-        severityLabel = '🟠 MEDIUM';
+        severityLabel = '🟠 Medium Pirority';
       }
 
-      const body = `### 🤖 ${issue.title}
-
-**Severity:** ${severityLabel}  
-**Description:**  
-${issue.description}  
-
-**Suggestion:**  
-${issue.suggestion}`;
+      const body = `### ${severityLabel}
+      **Issue:** ${issue.title}  
+      **Description:**  
+      ${issue.description}  
+      **Suggestion:**  
+      ${issue.suggestion}`;
 
       await octokit.rest.pulls.createReviewComment({
         owner,

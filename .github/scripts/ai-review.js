@@ -16,7 +16,7 @@ const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
 const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
-// === GET GIT DIFF: PR-safe and accurate === //
+// === GET GIT DIFF === //
 let diff = '';
 try {
   const base = process.env.GITHUB_BASE_REF || 'main';
@@ -114,10 +114,9 @@ async function runWithGemini() {
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
 }
 
-// === Helper to Find Snippet Line Range === //
+// === Match Code Snippets to File Lines === //
 function matchSnippetInFile(filePath, codeSnippet) {
   if (!fs.existsSync(filePath)) return null;
-
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
   const snippetLines = codeSnippet.trim().split('\n').map(line => line.trim());
@@ -141,7 +140,6 @@ function matchSnippetInFile(filePath, codeSnippet) {
 async function reviewCode() {
   try {
     let review = '';
-
     if (model === 'azure') {
       review = await runWithAzureOpenAI();
     } else if (model === 'gemini') {
@@ -150,17 +148,7 @@ async function reviewCode() {
       throw new Error("Unsupported model: use 'azure' or 'gemini'");
     }
 
-    console.log("\n🔍 AI Code Review Output:\n");
-    console.log(review);
-
-    const cleaned = review
-      .replace(/```json/g, '')
-      .replace(/```/g, '')
-      .trim();
-
-    console.log("\n🔍 Cleaned JSON Output:\n");
-    console.log(cleaned);
-
+    const cleaned = review.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(cleaned);
 
     const token = process.env.GITHUB_TOKEN;
@@ -172,26 +160,30 @@ async function reviewCode() {
     const prNumber = match?.[1];
     const commitId = github.context.payload.pull_request.head.sha;
 
-        // === Create a single summary comment ===
-    let summaryComment = `### AI Code Review Summary
+    // === 📝 Post Summary Comment First ===
+    let summaryComment = `### 🔍 AI Code Review Summary
 
 **📝 Overall Summary:**  
 ${parsed.overall_summary}
 
-**✅ Highlights:**  
-${parsed.positive_aspects.map((point, index) => `- ${point}`).join('\n')}
-`;
+**✅ Positive Aspects:**  
+${parsed.positive_aspects.map(p => `- ${p}`).join('\n')}`;
 
     if ((parsed.issues || []).length > 0) {
       summaryComment += `
 
-**⚠️ Detected Issues (${parsed.issues.length}):**\n`;
+**⚠️ Detected Issues (${parsed.issues.length}):**`;
       for (const issue of parsed.issues) {
-        summaryComment += `\n---\n**${issue.title}** (${issue.severity})\n${issue.description}\n*Suggestion:* ${issue.suggestion}`;
+        summaryComment += `
+
+---  
+**${issue.title}** (${issue.severity})  
+${issue.description}  
+*Suggestion:* ${issue.suggestion}`;
       }
     }
 
-      await octokit.rest.pulls.createReview({
+    await octokit.rest.pulls.createReview({
       owner,
       repo: repoName,
       pull_number: prNumber,
@@ -202,6 +194,7 @@ ${parsed.positive_aspects.map((point, index) => `- ${point}`).join('\n')}
 
     console.log(`💬 Posted summary comment.`);
 
+    // === 🗂 Match Inline Locations & Post Inline Comments ===
     for (const issue of parsed.issues || []) {
       const filePath = path.resolve(process.cwd(), issue.file);
       const result = matchSnippetInFile(filePath, issue.code_snippet);
@@ -224,7 +217,7 @@ ${parsed.positive_aspects.map((point, index) => `- ${point}`).join('\n')}
         severityLabel = '🟠 Medium Priority';
       }
 
-      const body = `# ${severityLabel}
+      const body = `#### ${severityLabel}
 
 **Issue:** ${issue.title}  
 **Description:**  

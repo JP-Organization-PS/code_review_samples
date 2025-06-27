@@ -186,15 +186,14 @@ async function reviewCode() {
 
     for (const issue of parsed.issues || []) {
       if (!issue.matched_line) continue;
+      let severityLabel = '<span style="background-color:#e6ffed; padding:2px 6px; border-radius:4px; font-weight:bold;">Low Priority</span>';
+if (issue.severity === 'CRITICAL' || issue.severity === 'MAJOR') {
+  severityLabel = '<span style="background-color:#ffeef0; padding:2px 6px; border-radius:4px; font-weight:bold;">High Priority</span>';
+} else if (issue.severity === 'MINOR') {
+  severityLabel = '<span style="background-color:#fff5b1; padding:2px 6px; border-radius:4px; font-weight:bold;">Medium Priority</span>';
+}
 
-      let severityLabel = '🟢 Low Priority';
-      if (issue.severity === 'CRITICAL' || issue.severity === 'MAJOR') {
-        severityLabel = '🔴 High Priority';
-      } else if (issue.severity === 'MINOR') {
-        severityLabel = '🟠 Medium Priority';
-      }
-
-      const body = `### ${severityLabel}
+const body = `### ${severityLabel}
 
 **Issue:** ${issue.title}  
 **Description:**  

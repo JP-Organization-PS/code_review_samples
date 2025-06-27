@@ -163,7 +163,7 @@ async function reviewCode() {
   const prNumber = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/)?.[1];
   const commitId = github.context.payload.pull_request.head.sha;
 
-  let summary = `### 🔍 AI Code Review Summary\n\n**📝 Overall Summary:**  \n${overall_summary}\n\n**✅ Positive Aspects:**  \n${positive_aspects.map(p => `- ${p}`).join('\n')}`;
+  let summary = `### AI Code Review Summary\n\n**📝 Overall Summary:**  \n${overall_summary}\n\n**✅ Positive Aspects:**  \n${positive_aspects.map(p => `- ${p}`).join('\n')}`;
 
   if (issues.length) {
     summary += `\n\n<details>\n<summary>⚠️ <strong>Detected Issues (${issues.length})</strong> — Click to expand</summary><br>\n`;

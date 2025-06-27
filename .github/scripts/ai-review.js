@@ -112,7 +112,19 @@ async function reviewCode() {
     summary += `\n\n<details>\n<summary>⚠️ <strong>Detected Issues (${issues.length})</strong> — Click to expand</summary><br>\n`;
     for (const issue of issues) {
       const emoji = issue.severity === 'CRITICAL' || issue.severity === 'MAJOR' ? '🔴' : issue.severity === 'MINOR' ? '🟠' : issue.severity === 'INFO' ? '🔵' : '🟢';
-      summary += `\n- <details>\n  <summary><strong>${emoji} ${issue.title}</strong> <em>(${issue.severity})</em></summary>\n  \n  **📁 File:** \\`${issue.file}\\`  \n  **🔢 Line:** ${issue.line || 'N/A'}\n\n  **📝 Description:**  \n  ${issue.description}\n\n  **💡 Suggestion:**  \n  ${issue.suggestion}\n  </details>`;
+      summary += `
+- <details>
+  <summary><strong>${emoji} ${issue.title}</strong> <em>(${issue.severity})</em></summary>
+
+  **📁 File:** \`${issue.file}\`  
+  **🔢 Line:** ${issue.line || 'N/A'}
+
+  **📝 Description:**  
+  ${issue.description}
+
+  **💡 Suggestion:**  
+  ${issue.suggestion}
+  </details>`;
     }
     summary += `\n</details>`;
   }

@@ -16,26 +16,39 @@ const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
 const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
-// === GET GIT DIFF === //
+const { execSync } = require('child_process');
+
 let diff = '';
 try {
-  try {
-    // Try diffing the last 2 commits
-    diff = execSync(`git diff HEAD~2 HEAD`, { stdio: 'pipe' }).toString();
-  } catch (e) {
-    // Fallback: only one commit, try diffing HEAD with its parent
-    console.warn("⚠️ Only one commit available, falling back to HEAD^ diff.");
-    diff = execSync(`git diff HEAD^ HEAD`, { stdio: 'pipe' }).toString();
+  const base = process.env.GITHUB_BASE_REF || 'main';
+
+  // Ensure base branch is fetched
+  execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
+
+  // Get the last 2 commits exclusive to the PR branch
+  const commits = execSync(`git rev-list origin/${base}..HEAD --reverse`)
+    .toString()
+    .trim()
+    .split('\n');
+
+  if (commits.length < 2) {
+    console.warn("⚠️ Less than 2 commits found in PR branch. Using last commit only.");
+    const lastCommit = commits[commits.length - 1];
+    diff = execSync(`git diff ${lastCommit}^ ${lastCommit}`, { stdio: 'pipe' }).toString();
+  } else {
+    const lastTwo = commits.slice(-2);
+    diff = execSync(`git diff ${lastTwo[0]} ${lastTwo[1]}`, { stdio: 'pipe' }).toString();
   }
 
   if (!diff.trim()) {
-    console.log("✅ No changes to review in recent commit(s). Skipping AI code review.");
+    console.log("✅ No changes found in the last 2 PR commits. Skipping AI review.");
     process.exit(0);
   }
 } catch (e) {
-  console.error("❌ Failed to get git diff:", e.message);
+  console.error("❌ Failed to get diff from last 2 commits in PR branch:", e.message);
   process.exit(1);
 }
+
 
 
 // === PROMPT === //

@@ -188,16 +188,15 @@ async function reviewCode() {
     .replace(/```/g, '')
     .trim();
 
+    console.log("\n🔍 Cleaned JSON Output:\n");
+    console.log(cleaned);
+
     let parsed;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch (err) {
-      console.error("❌ Failed to parse AI response as JSON. Posting raw review.");
-      await postCommentToGitHubPR(cleaned);
-      return;
-    }
+    parsed = JSON.parse(cleaned);
 
     for (const issue of parsed.issues || []) {
+      console.log("\n🔍 Parsed Issues:\n");
+      console.log(issue);
       const filePath = path.resolve(process.cwd(), issue.file);
       const result = matchSnippetInFile(filePath, issue.code_snippet);
       if (result) {
@@ -208,12 +207,6 @@ async function reviewCode() {
         console.warn(`❌ Could not match snippet for "${issue.title}" in ${issue.file}`);
       }
     }
-
-    fs.writeFileSync('review_with_line_matches.json', JSON.stringify(parsed, null, 2));
-    console.log("📝 Saved review_with_line_matches.json");
-
-    // Post to PR
-    await postCommentToGitHubPR('```json\n' + JSON.stringify(parsed, null, 2) + '\n```');
 
   } catch (err) {
     console.error("❌ Error during AI review:", err.response?.data || err.message);

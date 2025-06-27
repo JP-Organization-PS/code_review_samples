@@ -16,44 +16,54 @@ const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
 const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
+// === Helper to get a concise error message ===
+function getConciseErrorMessage(e) {
+    if (!e || !e.message) {
+        return "Unknown error.";
+    }
+    // Attempt to get the first line and truncate if it's too long
+    let msg = e.message.split('\n')[0].trim();
+    if (msg.length > 120) { // Limit length to avoid extremely long lines
+        msg = msg.substring(0, 120) + '...';
+    }
+    return msg;
+}
+
 // === GET GIT DIFF FOR LAST TWO COMMITS === //
 let diff = '';
 let commitDetails = []; // To store details of the last two commits
 
 try {
     // Ensure we have enough history for the last two commits
-    // Fetch shallowly if needed, or ensure full history if the action runs on `push` event.
-    // For a PR, GITHUB_SHA is the merge commit, so we need to go back from there.
-    execSync(`git fetch origin ${process.env.GITHUB_BASE_REF || 'main'}`, { stdio: 'inherit' });
+    // This is crucial for 'git diff HEAD~1...HEAD' and similar commands.
+    // In a GitHub Action, use 'fetch-depth: 0' in actions/checkout.
+    console.log("Fetching Git history to ensure all relevant commits are available...");
+    execSync(`git fetch origin ${process.env.GITHUB_BASE_REF || 'main'} --tags --force`, { stdio: 'inherit' });
+    execSync(`git fetch origin ${process.env.GITHUB_HEAD_REF || ''} --tags --force`, { stdio: 'inherit' });
 
-    // Get the SHA of the current HEAD and the commit two before HEAD
-    // This assumes the current workflow run is on the latest commit of the branch/PR.
-    // If you are reviewing a PR merge commit, then HEAD~1 is the tip of the PR branch.
-    // If reviewing individual pushes, HEAD is the latest push.
-    // For reviewing "the last two commits pushed", you'd typically review HEAD and HEAD~1.
-
+    // Get the SHA of the current HEAD
     const latestCommitSha = execSync('git rev-parse HEAD').toString().trim();
     let secondToLastCommitSha = '';
+    let thirdToLastCommitSha = ''; // To help determine if secondToLast has a parent
 
     try {
         secondToLastCommitSha = execSync('git rev-parse HEAD~1').toString().trim();
     } catch (e) {
-        console.log("Only one commit found in the current branch. Reviewing only the latest commit.");
-        secondToLastCommitSha = latestCommitSha; // Fallback to diffing latest vs its parent if only one commit
+        console.log("Only one commit found relative to HEAD. Review will focus on this single commit.");
+        secondToLastCommitSha = ''; // Explicitly empty if only one commit
     }
 
-    let thirdToLastCommitSha = '';
-    try {
-        thirdToLastCommitSha = execSync('git rev-parse HEAD~2').toString().trim();
-    } catch (e) {
-        // If there are less than 2 commits, this will fail.
-        // In this case, we will diff HEAD~1 against its parent (if it exists), or HEAD against its parent.
-        // We'll handle the diff logic more robustly below.
+    if (secondToLastCommitSha) {
+        try {
+            thirdToLastCommitSha = execSync('git rev-parse HEAD~2').toString().trim();
+        } catch (e) {
+            console.log("Less than two distinct historical commits. Will diff second-to-last commit against its own parent (if it's not the initial commit).");
+        }
     }
 
 
-    // Get details of the last two relevant commits for the prompt
-    // For the latest commit
+    // Get details of the latest commit for the prompt
+    // Format: %h (hash), %an (author name), %s (subject)
     const latestCommitInfo = execSync(`git log -1 --pretty=format:"%h%n%an%n%s" ${latestCommitSha}`).toString().trim().split('\n');
     commitDetails.push({
         hash: latestCommitInfo[0],
@@ -62,8 +72,8 @@ try {
         isLatest: true
     });
 
-    // For the commit before the latest
-    if (secondToLastCommitSha && secondToLastCommitSha !== latestCommitSha) { // Ensure it's a distinct commit
+    // Get details of the second-to-last commit, if it exists and is distinct
+    if (secondToLastCommitSha && secondToLastCommitSha !== latestCommitSha) {
         const secondCommitInfo = execSync(`git log -1 --pretty=format:"%h%n%an%n%s" ${secondToLastCommitSha}`).toString().trim().split('\n');
         commitDetails.push({
             hash: secondCommitInfo[0],
@@ -73,42 +83,49 @@ try {
         });
     }
 
-    console.log("Fetching diffs for the last two commits...");
+    console.log("Generating diffs for the last two relevant commits...");
 
-    let diff1 = '';
-    let diff2 = '';
+    let diffForLatestCommit = '';
+    let diffForSecondToLastCommit = '';
 
-    // Diff for the latest commit (HEAD vs HEAD~1)
+    // Diff for the latest commit: HEAD vs its parent (HEAD~1)
     try {
-        diff1 = execSync(`git diff ${latestCommitSha}~1...${latestCommitSha}`, { stdio: 'pipe' }).toString();
+        // If HEAD has no parent (initial commit), this will throw.
+        // The default `git diff A...B` already includes the +/- signs.
+        diffForLatestCommit = execSync(`git diff ${latestCommitSha}~1...${latestCommitSha}`, { stdio: 'pipe' }).toString();
     } catch (e) {
-        // This might happen if HEAD is the initial commit with no parent
-        console.warn(`Could not get diff for latest commit (${latestCommitSha}) against its parent. It might be the initial commit. Error: ${e.message}`);
+        console.warn(`Could not get diff for latest commit (${latestCommitSha}) against its parent. It might be the initial commit or has no parent. Error: ${getConciseErrorMessage(e)}`);
     }
 
-    // Diff for the second to last commit (HEAD~1 vs HEAD~2)
-    if (secondToLastCommitSha && secondToLastCommitSha !== latestCommitSha) { // Only if there's a distinct second commit
+    // Diff for the second-to-last commit: HEAD~1 vs its parent (HEAD~2)
+    if (secondToLastCommitSha && secondToLastCommitSha !== latestCommitSha) {
         try {
-            diff2 = execSync(`git diff ${secondToLastCommitSha}~1...${secondToLastCommitSha}`, { stdio: 'pipe' }).toString();
+            // Check if secondToLastCommitSha actually has a parent before trying to diff
+            if (thirdToLastCommitSha) {
+                diffForSecondToLastCommit = execSync(`git diff ${secondToLastCommitSha}~1...${secondToLastCommitSha}`, { stdio: 'pipe' }).toString();
+            } else {
+                console.warn(`Second-to-last commit (${secondToLastCommitSha}) has no known parent (HEAD~2 does not exist). Skipping diff for it.`);
+            }
         } catch (e) {
-            console.warn(`Could not get diff for second to last commit (${secondToLastCommitSha}) against its parent. It might be the initial or only commit. Error: ${e.message}`);
+            console.warn(`An unexpected error occurred while getting diff for second-to-last commit (${secondToLastCommitSha}). Error: ${getConciseErrorMessage(e)}`);
         }
     }
 
 
-    // Combine diffs, indicating which commit they belong to
-    if (diff1) {
-        diff += `--- Diff for Latest Commit (${commitDetails[0].hash}): ${commitDetails[0].subject} by ${commitDetails[0].author} ---\n`;
-        diff += diff1 + '\n\n';
+    // Combine diffs, ensuring they retain their +/- prefixes and are clearly separated for the AI
+    if (diffForLatestCommit) {
+        diff += `--- DIFF FOR LATEST COMMIT (${commitDetails[0].hash}): ${commitDetails[0].subject} by ${commitDetails[0].author} ---\n`;
+        diff += diffForLatestCommit + '\n\n';
     } else {
-        console.log(`No diff generated for latest commit ${commitDetails[0].hash}.`);
+        console.log(`No line changes detected for latest commit ${commitDetails[0].hash}.`);
     }
 
-    if (diff2) {
-        diff += `--- Diff for Second-to-Last Commit (${commitDetails[1].hash}): ${commitDetails[1].subject} by ${commitDetails[1].author} ---\n`;
-        diff += diff2 + '\n\n';
-    } else if (secondToLastCommitSha && secondToLastCommitSha !== latestCommitSha) {
-         console.log(`No diff generated for second-to-last commit ${commitDetails[1].hash}.`);
+    // Add the second commit's diff if it exists and is distinct
+    if (commitDetails.length > 1 && diffForSecondToLastCommit) {
+        diff += `--- DIFF FOR SECOND-TO-LAST COMMIT (${commitDetails[1].hash}): ${commitDetails[1].subject} by ${commitDetails[1].author} ---\n`;
+        diff += diffForSecondToLastCommit + '\n\n';
+    } else if (commitDetails.length > 1 && !diffForSecondToLastCommit) {
+        console.log(`No line changes detected for second-to-last commit ${commitDetails[1].hash}.`);
     }
 
 
@@ -116,9 +133,12 @@ try {
         console.log("✅ No significant changes detected in the last two commits to review. Skipping AI code review.");
         process.exit(0);
     }
+    console.log("--- Raw Diff Content Sent to AI (first 500 chars) ---");
+    console.log(diff.substring(0, 500) + (diff.length > 500 ? '...' : ''));
+    console.log("-----------------------------------------------------");
 
 } catch (e) {
-    console.error("❌ Failed to get git diff for last two commits:", e.message);
+    console.error(`❌ Failed to get git diff for last two commits: ${getConciseErrorMessage(e)}`);
     process.exit(1);
 }
 
@@ -147,7 +167,7 @@ Your JSON output must follow this structure:
             "file": "Relative path to file (e.g., .github/scripts/ai-review.js)",
             "line": "Line number(s) where the issue occurs",
             "code_snippet": "Relevant snippet of the affected code",
-            "commit_hash_related": "The hash of the commit this issue primarily relates to (e.g., ${commitDetails[0] ? commitDetails[0].hash : ''})" // New field
+            "commit_hash_related": "The hash of the commit this issue primarily relates to (e.g., ${commitDetails[0] ? commitDetails[0].hash : ''})" // New field for AI to fill
         }
     ]
 }
@@ -161,7 +181,6 @@ ${diff}
 `;
 
 // === AI Clients === //
-// (No changes needed in AI client functions themselves)
 async function runWithAzureOpenAI() {
     console.log("🔷 Using Azure OpenAI...");
     const res = await axios.post(
@@ -211,8 +230,15 @@ async function runWithGemini() {
 }
 
 // === Helper to Find Snippet Line Range === //
+// This function finds the line number of a *clean* code snippet within a file.
+// It is NOT designed to work with lines that have +/- prefixes.
 function matchSnippetInFile(filePath, codeSnippet) {
-    if (!fs.existsSync(filePath)) return null;
+    if (!fs.existsSync(filePath)) {
+        return null;
+    }
+    if (!codeSnippet || codeSnippet.trim() === '') {
+        return null;
+    }
 
     const content = fs.readFileSync(filePath, 'utf-8');
     const lines = content.split('\n');
@@ -240,20 +266,20 @@ function matchSnippetInFile(filePath, codeSnippet) {
 async function postCommentToGitHubPR(reviewText) {
     try {
         const token = process.env.GITHUB_TOKEN;
-        if (!token) throw new Error("GITHUB_TOKEN is not set.");
+        if (!token) throw new Error("GITHUB_TOKEN is not set. Cannot post PR comment.");
 
         const octokit = github.getOctokit(token);
         const repo = process.env.GITHUB_REPOSITORY;
         const ref = process.env.GITHUB_REF;
 
-        if (!repo || !ref) throw new Error("GITHUB_REPOSITORY or GITHUB_REF is not set.");
+        if (!repo || !ref) throw new Error("GITHUB_REPOSITORY or GITHUB_REF is not set. Cannot post PR comment.");
 
         const [owner, repoName] = repo.split('/');
         const match = ref.match(/refs\/pull\/(\d+)\/merge/);
         const prNumber = match?.[1];
 
         if (!prNumber) {
-            console.warn("Could not determine PR number from GITHUB_REF. This might not be a PR context. Skipping PR comment.");
+            console.warn("Could not determine PR number from GITHUB_REF. This might not be a PR context (e.g., direct push to branch). Skipping PR comment.");
             return;
         }
 
@@ -280,7 +306,7 @@ async function reviewCode() {
         } else if (model === 'gemini') {
             review = await runWithGemini();
         } else {
-            throw new Error("Unsupported model: use 'azure' or 'gemini'");
+            throw new Error(`Unsupported AI_MODEL: '${model}'. Use 'azure' or 'gemini'.`);
         }
 
         console.log("\n🔍 AI Code Review Output:\n");
@@ -288,15 +314,26 @@ async function reviewCode() {
 
         let parsed;
         try {
-            parsed = JSON.parse(review);
+            // Attempt to parse JSON, sometimes models might include markdown or extra text
+            // Try to extract JSON if it's wrapped in markdown
+            const jsonMatch = review.match(/```json\n([\s\S]*?)\n```/);
+            if (jsonMatch && jsonMatch[1]) {
+                parsed = JSON.parse(jsonMatch[1]);
+            } else {
+                parsed = JSON.parse(review);
+            }
         } catch (err) {
-            console.error("❌ Failed to parse AI response as JSON. Posting raw review.");
-            await postCommentToGitHubPR(review);
+            console.error("❌ Failed to parse AI response as JSON. Posting raw review. Error:", err.message);
+            await postCommentToGitHubPR(`### AI Review Failed to Parse JSON\n\n\`\`\`\n${review}\n\`\`\``);
             return;
         }
 
         // Add commit_hash_related to parsed issues for better context in output file
         for (const issue of parsed.issues || []) {
+            // Ensure issue.file and issue.code_snippet are strings before processing
+            issue.file = String(issue.file || '');
+            issue.code_snippet = String(issue.code_snippet || '');
+
             const filePath = path.resolve(process.cwd(), issue.file);
             const result = matchSnippetInFile(filePath, issue.code_snippet);
             if (result) {
@@ -304,20 +341,67 @@ async function reviewCode() {
                 console.log(`✅ Matched "${issue.title}" at ${issue.file}:${issue.matched_line_range}`);
             } else {
                 issue.matched_line_range = null;
-                console.warn(`❌ Could not match snippet for "${issue.title}" in ${issue.file}`);
+                console.warn(`❌ Could not match snippet for "${issue.title}" in ${issue.file}. Snippet (first line): "${issue.code_snippet.split('\n')[0].substring(0, 50)}..."`);
             }
-            // Ensure commit_hash_related is present, even if empty
+            // Ensure commit_hash_related is present, even if the AI didn't explicitly provide it
             issue.commit_hash_related = issue.commit_hash_related || '';
         }
 
+        // Save the detailed review to a file (useful for debugging or other steps)
         fs.writeFileSync('review_with_line_matches.json', JSON.stringify(parsed, null, 2));
         console.log("📝 Saved review_with_line_matches.json");
 
-        // Post to PR
-        await postCommentToGitHubPR('```json\n' + JSON.stringify(parsed, null, 2) + '\n```');
+        // Format and post the review to the PR
+        let commentBody = `### 🤖 AI Code Review (Last 2 Commits)\n\n`;
+
+        if (parsed.overall_summary) {
+            commentBody += `**Overall Summary:** ${parsed.overall_summary}\n\n`;
+        }
+        if (parsed.positive_aspects && parsed.positive_aspects.length > 0) {
+            commentBody += `**Positive Aspects:**\n`;
+            parsed.positive_aspects.forEach(aspect => commentBody += `- ${aspect}\n`);
+            commentBody += `\n`;
+        }
+
+        if (parsed.issues && parsed.issues.length > 0) {
+            commentBody += `**Identified Issues:**\n\n`;
+            parsed.issues.forEach(issue => {
+                const severityIcon = {
+                    'CRITICAL': '🔴',
+                    'MAJOR': '🟠',
+                    'MINOR': '🟡',
+                    'INFO': '⚪'
+                }[issue.severity] || '❓';
+                const fileLink = issue.matched_line_range ?
+                    `${issue.file}#L${issue.matched_line_range.split('-')[0]}-L${issue.matched_line_range.split('-')[1]}` :
+                    issue.file;
+                const commitInfo = issue.commit_hash_related ? ` (Commit: \`${issue.commit_hash_related.substring(0, 7)}\`)` : '';
+
+                commentBody += `<details><summary>${severityIcon} **${issue.title}** in \`${fileLink}\`${commitInfo}</summary>\n\n`;
+                commentBody += `**Severity:** \`${issue.severity || 'UNKNOWN'}\`\n\n`;
+                if (issue.description) {
+                    commentBody += `**Description:** ${issue.description}\n\n`;
+                }
+                if (issue.suggestion) {
+                    commentBody += `**Suggestion:** ${issue.suggestion}\n\n`;
+                }
+                if (issue.code_snippet) {
+                    commentBody += `\`\`\`\n${issue.code_snippet}\n\`\`\`\n`;
+                }
+                commentBody += `</details>\n\n`;
+            });
+        } else {
+            commentBody += `**No specific issues identified in these commits. Great job!** 🎉\n\n`;
+        }
+
+        commentBody += `---\n<small>This review was generated by AI model: \`${model}\`</small>`;
+
+        await postCommentToGitHubPR(commentBody);
 
     } catch (err) {
-        console.error("❌ Error during AI review:", err.response?.data || err.message);
+        console.error(`❌ Error during AI review process: ${getConciseErrorMessage(err)}`);
+        // Post a basic error message to the PR if the entire process fails
+        await postCommentToGitHubPR(`### 🤖 AI Code Review Error\n\nAn error occurred during the AI code review process: \`${getConciseErrorMessage(err)}\`\n\nPlease check the action logs for more details.`);
     }
 }
 

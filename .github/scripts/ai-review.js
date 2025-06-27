@@ -100,6 +100,7 @@ function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
     const window = lines.slice(i, i + snippetLines.length).map(l => l.trim());
     const exactMatch = snippetLines.every((line, j) => window[j] === line);
     if (exactMatch) {
+      console.log(`Matched using exact logic at line ${i + 1}`);
       return { start: i + 1, end: i + snippetLines.length };
     }
   }
@@ -113,12 +114,15 @@ function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
     const average = similarity.reduce((a, b) => a + b, 0) / similarity.length;
 
     if (average >= threshold) {
+      console.log(`Matched using fuzzy logic (score: ${average.toFixed(2)}) at line ${i + 1}`);
       return { start: i + 1, end: i + snippetLines.length };
     }
   }
 
+  console.warn(`No match found for snippet:\n${codeSnippet}`);
   return null;
 }
+
 
 function matchSnippet_old(filePath, codeSnippet) {
   if (!fs.existsSync(filePath)) return null;

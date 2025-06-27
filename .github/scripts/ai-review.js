@@ -23,7 +23,7 @@ function getGitDiff() {
   try {
     const base = process.env.GITHUB_BASE_REF || 'main';
     execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
-    const diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
+    const diff = execSync(`git diff --unified=0 origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
     if (!diff.trim()) {
       console.log("No changes found in PR. Skipping AI review.");
       process.exit(0);

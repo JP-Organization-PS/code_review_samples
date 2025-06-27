@@ -13,6 +13,9 @@ def process(data, mode='default'):
         elif mode == 'reverse':
             data = data[::-1]
             print("Reversed data:", data)
+        elif mode == 'lower':
+            data = data.lower()
+            print("Lowercase data:", data)
 
         result = data.upper()
         print("Processed result:", result)
@@ -22,27 +25,25 @@ def process(data, mode='default'):
         return None
 
 
-def read_file(filepath, verbose=False):
+def read_file(filepath, verbose=False, encoding='utf-8'):
     if not os.path.exists(filepath):
         print("File does not exist:", filepath)
         return None
     try:
-        with open(filepath, 'r') as f:
+        with open(filepath, 'r', encoding=encoding) as f:
             content = f.read()
             if verbose:
                 print(f"Reading file: {filepath}")
                 print(f"Line count: {len(content.splitlines())}")
             return content
-    except FileNotFoundError:
-        print("File not found:", filepath)
-    except IOError as e:
-        print("IO error reading file:", filepath, "-", str(e))
-    return None
+    except (FileNotFoundError, IOError) as e:
+        print("Error reading file:", filepath, "-", str(e))
+        return None
 
 
-def write_file(filepath, content):
+def write_file(filepath, content, encoding='utf-8'):
     try:
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding=encoding) as f:
             f.write(content)
         print(f"Content written to {filepath}")
         return True
@@ -51,23 +52,25 @@ def write_file(filepath, content):
         return False
 
 
-def calculate(x, y, operation='subtract'):
+def calculate(x, y, operation='subtract', round_result=False):
     try:
+        result = None
         if operation == 'subtract':
-            return x - y
+            result = x - y
         elif operation == 'add':
-            return x + y
+            result = x + y
         elif operation == 'multiply':
-            return x * y
+            result = x * y
         elif operation == 'divide':
-            return x / y
+            result = x / y
         elif operation == 'modulus':
-            return x % y
+            result = x % y
         elif operation == 'power':
-            return x ** y
+            result = x ** y
         else:
             print("Unsupported operation:", operation)
             return None
+        return round(result, 2) if round_result else result
     except ZeroDivisionError:
         print("Cannot divide by zero.")
         return None
@@ -101,6 +104,10 @@ def generate_fibonacci(n):
     while len(fib) < n:
         fib.append(fib[-1] + fib[-2])
     return fib[:n]
+
+
+def get_prime_numbers(limit):
+    return [x for x in range(2, limit) if is_prime(x)]
 
 
 def do_work(factor=42, count=10, callback=None):
@@ -137,3 +144,41 @@ def compare_strings(a, b, case_sensitive=False):
     else:
         print("Strings are different.")
         return False
+
+
+# 🔥 New Utility Functions Below 🔥
+
+def get_file_size(filepath):
+    if os.path.isfile(filepath):
+        size = os.path.getsize(filepath)
+        print(f"File size of {filepath}: {size} bytes")
+        return size
+    else:
+        print("File not found:", filepath)
+        return -1
+
+
+def reverse_words(text):
+    if not isinstance(text, str):
+        print("Expected a string input.")
+        return ""
+    reversed_text = ' '.join(reversed(text.strip().split()))
+    print("Reversed word order:", reversed_text)
+    return reversed_text
+
+
+def merge_dicts(dict1, dict2):
+    if not isinstance(dict1, dict) or not isinstance(dict2, dict):
+        print("Both inputs should be dictionaries.")
+        return {}
+    merged = {**dict1, **dict2}
+    print("Merged dictionary:", merged)
+    return merged
+
+
+def safe_divide(a, b, fallback=0):
+    try:
+        return a / b
+    except ZeroDivisionError:
+        print("Divide by zero encountered. Returning fallback value.")
+        return fallback

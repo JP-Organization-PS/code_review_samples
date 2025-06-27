@@ -19,17 +19,24 @@ const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/
 // === GET GIT DIFF === //
 let diff = '';
 try {
-  const base = process.env.GITHUB_BASE_REF || 'main';
-  execSync(`git fetch origin ${base}`, { stdio: 'inherit' }); // Ensure base branch is available
-  diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
+  try {
+    // Try diffing the last 2 commits
+    diff = execSync(`git diff HEAD~2 HEAD`, { stdio: 'pipe' }).toString();
+  } catch (e) {
+    // Fallback: only one commit, try diffing HEAD with its parent
+    console.warn("⚠️ Only one commit available, falling back to HEAD^ diff.");
+    diff = execSync(`git diff HEAD^ HEAD`, { stdio: 'pipe' }).toString();
+  }
+
   if (!diff.trim()) {
-    console.log("✅ No changes to review. Skipping AI code review.");
+    console.log("✅ No changes to review in recent commit(s). Skipping AI code review.");
     process.exit(0);
   }
 } catch (e) {
   console.error("❌ Failed to get git diff:", e.message);
   process.exit(1);
 }
+
 
 // === PROMPT === //
 const prompt = `

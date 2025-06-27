@@ -172,6 +172,36 @@ async function reviewCode() {
     const prNumber = match?.[1];
     const commitId = github.context.payload.pull_request.head.sha;
 
+        // === Create a single summary comment ===
+    let summaryComment = `### AI Code Review Summary
+
+**📝 Overall Summary:**  
+${parsed.overall_summary}
+
+**✅ Highlights:**  
+${parsed.positive_aspects.map((point, index) => `- ${point}`).join('\n')}
+`;
+
+    if ((parsed.issues || []).length > 0) {
+      summaryComment += `
+
+**⚠️ Detected Issues (${parsed.issues.length}):**\n`;
+      for (const issue of parsed.issues) {
+        summaryComment += `\n---\n**${issue.title}** (${issue.severity})\n${issue.description}\n*Suggestion:* ${issue.suggestion}`;
+      }
+    }
+
+      await octokit.rest.pulls.createReview({
+      owner,
+      repo: repoName,
+      pull_number: prNumber,
+      commit_id: commitId,
+      event: 'COMMENT',
+      body: summaryComment
+    });
+
+    console.log(`💬 Posted summary comment.`);
+
     for (const issue of parsed.issues || []) {
       const filePath = path.resolve(process.cwd(), issue.file);
       const result = matchSnippetInFile(filePath, issue.code_snippet);
@@ -194,7 +224,7 @@ async function reviewCode() {
         severityLabel = '🟠 Medium Priority';
       }
 
-      const body = `#### ${severityLabel}
+      const body = `# ${severityLabel}
 
 **Issue:** ${issue.title}  
 **Description:**  

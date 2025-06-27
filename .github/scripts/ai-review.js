@@ -1,269 +1,157 @@
+// ai-review.js
 const axios = require('axios');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
 const fs = require('fs');
 const path = require('path');
 
-// === CONFIGURATION === //
-const model = process.env.AI_MODEL || 'gemini'; // Options: 'gemini' or 'azure'
+const CONFIG = {
+  model: process.env.AI_MODEL || 'gemini',
+  azure: {
+    key: process.env.AZURE_OPENAI_KEY,
+    endpoint: process.env.AZURE_OPENAI_ENDPOINT,
+    deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
+  },
+  gemini: {
+    key: process.env.GEMINI_API_KEY,
+    endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${process.env.GEMINI_API_KEY}`,
+  },
+};
 
-// --- Azure OpenAI Settings --- //
-const azureKey = process.env.AZURE_OPENAI_KEY;
-const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-
-// --- Gemini Settings --- //
-const geminiKey = process.env.GEMINI_API_KEY;
-const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
-
-// === GET GIT DIFF === //
-let diff = '';
-try {
-  const base = process.env.GITHUB_BASE_REF || 'main';
-  execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
-  diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
-
-  if (!diff.trim()) {
-    console.log("✅ No changes found in PR. Skipping AI review.");
-    process.exit(0);
+function getGitDiff() {
+  try {
+    const base = process.env.GITHUB_BASE_REF || 'main';
+    execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
+    const diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
+    if (!diff.trim()) {
+      console.log("✅ No changes found in PR. Skipping AI review.");
+      process.exit(0);
+    }
+    console.log("✅ Diff generated from PR changes.");
+    return diff;
+  } catch (e) {
+    console.error("❌ Failed to get diff from PR branch:", e.message);
+    process.exit(1);
   }
-
-  console.log("✅ Diff generated from PR changes.");
-} catch (e) {
-  console.error("❌ Failed to get diff from PR branch:", e.message);
-  process.exit(1);
 }
 
-// === PROMPT === //
-const prompt = `
-You are an expert software engineer and code reviewer specializing in clean code, security, performance, and maintainability.
+function buildPrompt(diff) {
+  return `You are an expert software engineer and code reviewer specializing in clean code, security, performance, and maintainability.
 
 Please review the following code diff and respond in strict JSON format.
 
-Your JSON output must follow this structure:
-
-{
-  "overall_summary": "Brief summary of the changes and your general impression.",
-  "positive_aspects": ["List of good practices observed."],
-  "issues": [
-    {
-      "severity": "[INFO|MINOR|MAJOR|CRITICAL]",
-      "title": "Short title or label of the issue",
-      "description": "Detailed explanation of the issue or concern.",
-      "suggestion": "Proposed fix or recommendation.",
-      "file": "Relative path to file (e.g., .github/scripts/ai-review.js)",
-      "line": "Line number(s) where the issue occurs",
-      "code_snippet": "Relevant snippet of the affected code"
-    }
-  ]
-}
+{ "overall_summary": "...", "positive_aspects": ["..."], "issues": [{ "severity": "...", "title": "...", "description": "...", "suggestion": "...", "file": "...", "line": "...", "code_snippet": "..." }] }
 
 Respond with only a single valid JSON object. No Markdown, headers, or commentary.
 
 Here is the code diff:
 
-${diff}
-`;
+${diff}`;
+}
 
-// === AI Clients === //
-async function runWithAzureOpenAI() {
+async function requestAzure(prompt) {
   console.log("🔷 Using Azure OpenAI...");
+  const { endpoint, deployment, key } = CONFIG.azure;
   const res = await axios.post(
-    `${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-03-01-preview`,
+    `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=2024-03-01-preview`,
     {
       messages: [
         { role: "system", content: "You are a professional code reviewer." },
-        { role: "user", content: prompt }
+        { role: "user", content: prompt },
       ],
       temperature: 0.3,
-      max_tokens: 4096
+      max_tokens: 4096,
     },
-    {
-      headers: {
-        "api-key": azureKey,
-        "Content-Type": "application/json"
-      }
-    }
+    { headers: { 'api-key': key, 'Content-Type': 'application/json' } }
   );
-  return res.data.choices?.[0]?.message?.content?.trim() || "No response from Azure OpenAI.";
+  return res.data.choices?.[0]?.message?.content?.trim() || "No response from Azure.";
 }
 
-async function runWithGemini() {
+async function requestGemini(prompt) {
   console.log("🔶 Using Gemini...");
   const res = await axios.post(
-    geminiEndpoint,
+    CONFIG.gemini.endpoint,
     {
-      contents: [
-        {
-          parts: [{ text: prompt }],
-          role: "user"
-        }
-      ],
-      generationConfig: {
-        temperature: 0.1,
-        topP: 0.9,
-        maxOutputTokens: 8192
-      }
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: 8192 },
     },
-    {
-      headers: {
-        "Content-Type": "application/json"
-      }
-    }
+    { headers: { 'Content-Type': 'application/json' } }
   );
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
 }
 
-// === Match Code Snippets to File Lines === //
-function matchSnippetInFile(filePath, codeSnippet) {
+function matchSnippet(filePath, codeSnippet) {
   if (!fs.existsSync(filePath)) return null;
-  const content = fs.readFileSync(filePath, 'utf-8');
-  const lines = content.split('\n');
-  const snippetLines = codeSnippet.trim().split('\n').map(line => line.trim());
+  const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+  const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());
 
   for (let i = 0; i <= lines.length - snippetLines.length; i++) {
-    let matched = true;
-    for (let j = 0; j < snippetLines.length; j++) {
-      if (lines[i + j].trim() !== snippetLines[j]) {
-        matched = false;
-        break;
-      }
-    }
-    if (matched) {
+    if (snippetLines.every((line, j) => lines[i + j].trim() === line)) {
       return { start: i + 1, end: i + snippetLines.length };
     }
   }
   return null;
 }
 
-// === Main Logic === //
 async function reviewCode() {
-  try {
-    let review = '';
-    if (model === 'azure') {
-      review = await runWithAzureOpenAI();
-    } else if (model === 'gemini') {
-      review = await runWithGemini();
-    } else {
-      throw new Error("Unsupported model: use 'azure' or 'gemini'");
+  const diff = getGitDiff();
+  const prompt = buildPrompt(diff);
+  const review = CONFIG.model === 'azure' ? await requestAzure(prompt) : await requestGemini(prompt);
+
+  const parsed = JSON.parse(review.replace(/```json|```/g, '').trim());
+  const { overall_summary, positive_aspects, issues = [] } = parsed;
+
+  const octokit = github.getOctokit(process.env.GITHUB_TOKEN);
+  const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+  const prNumber = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/)?.[1];
+  const commitId = github.context.payload.pull_request.head.sha;
+
+  let summary = `### 🔍 AI Code Review Summary\n\n**📝 Overall Summary:**  \n${overall_summary}\n\n**✅ Positive Aspects:**  \n${positive_aspects.map(p => `- ${p}`).join('\n')}`;
+
+  if (issues.length) {
+    summary += `\n\n<details>\n<summary>⚠️ <strong>Detected Issues (${issues.length})</strong> — Click to expand</summary><br>\n`;
+    for (const issue of issues) {
+      const emoji = issue.severity === 'CRITICAL' || issue.severity === 'MAJOR' ? '🔴' : issue.severity === 'MINOR' ? '🟠' : issue.severity === 'INFO' ? '🔵' : '🟢';
+      summary += `\n- <details>\n  <summary><strong>${emoji} ${issue.title}</strong> <em>(${issue.severity})</em></summary>\n  \n  **📁 File:** \\`${issue.file}\\`  \n  **🔢 Line:** ${issue.line || 'N/A'}\n\n  **📝 Description:**  \n  ${issue.description}\n\n  **💡 Suggestion:**  \n  ${issue.suggestion}\n  </details>`;
     }
-
-    const cleaned = review.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(cleaned);
-
-    const token = process.env.GITHUB_TOKEN;
-    const octokit = github.getOctokit(token);
-    const repo = process.env.GITHUB_REPOSITORY;
-    const ref = process.env.GITHUB_REF;
-    const [owner, repoName] = repo.split('/');
-    const match = ref.match(/refs\/pull\/(\d+)\/merge/);
-    const prNumber = match?.[1];
-    const commitId = github.context.payload.pull_request.head.sha;
-
-// === 📝 Post Summary Comment First ===
-let summaryComment = `### 🔍 AI Code Review Summary
-
-**📝 Overall Summary:**  
-${parsed.overall_summary}
-
-**✅ Positive Aspects:**  
-${parsed.positive_aspects.map(p => `- ${p}`).join('\n')}`;
-
-if ((parsed.issues || []).length > 0) {
-  summaryComment += `
-
-<details>
-<summary>⚠️ <strong>Detected Issues (${parsed.issues.length})</strong> — Click to expand</summary><br>\n\n`;
-
-  for (const issue of parsed.issues) {
-    let severityEmoji = '🟢';
-    if (issue.severity === 'MAJOR' || issue.severity === 'CRITICAL') severityEmoji = '🔴';
-    else if (issue.severity === 'MINOR') severityEmoji = '🟠';
-    else if (issue.severity === 'INFO') severityEmoji = '🔵';
-
-    summaryComment += `
-- <details>
-  <summary><strong>${severityEmoji} ${issue.title}</strong> <em>(${issue.severity})</em></summary>
-
-  **📁 File:** \`${issue.file}\`  
-  **🔢 Line:** ${issue.line || 'N/A'}
-
-  ---
-
-  **📝 Description:**  
-  ${issue.description}
-
-  **💡 Suggestion:**  
-  ${issue.suggestion}
-
-  </details>`;
+    summary += `\n</details>`;
   }
 
-  summaryComment += `\n</details>\n`;
-}
+  await octokit.rest.pulls.createReview({
+    owner,
+    repo,
+    pull_number: prNumber,
+    commit_id: commitId,
+    event: 'COMMENT',
+    body: summary,
+  });
+  console.log(`💬 Posted summary comment.`);
 
+  for (const issue of issues) {
+    const result = matchSnippet(path.resolve(process.cwd(), issue.file), issue.code_snippet);
+    if (!result) continue;
 
+    const priority = issue.severity === 'CRITICAL' || issue.severity === 'MAJOR'
+      ? '🔴 High Priority'
+      : issue.severity === 'MINOR'
+        ? '🟠 Medium Priority'
+        : issue.severity === 'INFO'
+          ? '🔵 Info'
+          : '🟢 Low Priority';
 
+    const body = `#### ${priority}\n\n**Issue:** ${issue.title}  \n**Description:**  \n${issue.description}  \n\n**Suggestion:**  \n${issue.suggestion}`;
 
-
-    await octokit.rest.pulls.createReview({
+    await octokit.rest.pulls.createReviewComment({
       owner,
-      repo: repoName,
+      repo,
       pull_number: prNumber,
       commit_id: commitId,
-      event: 'COMMENT',
-      body: summaryComment
+      path: issue.file,
+      line: result.start,
+      side: 'RIGHT',
+      body,
     });
-
-    console.log(`💬 Posted summary comment.`);
-
-    // === 🗂 Match Inline Locations & Post Inline Comments ===
-    for (const issue of parsed.issues || []) {
-      const filePath = path.resolve(process.cwd(), issue.file);
-      const result = matchSnippetInFile(filePath, issue.code_snippet);
-      if (result) {
-        issue.matched_line = result.start;
-        console.log(`✅ Matched "${issue.title}" at ${issue.file}:${result.start}`);
-      } else {
-        issue.matched_line = null;
-        console.warn(`❌ Could not match snippet for "${issue.title}" in ${issue.file}`);
-      }
-    }
-
-    for (const issue of parsed.issues || []) {
-      if (!issue.matched_line) continue;
-
-      let severityLabel = '🟢 Low Priority';
-      if (issue.severity === 'CRITICAL' || issue.severity === 'MAJOR') {
-        severityLabel = '🔴 High Priority';
-      } else if (issue.severity === 'MINOR') {
-        severityLabel = '🟠 Medium Priority';
-      }
-
-      const body = `#### ${severityLabel}
-
-**Issue:** ${issue.title}  
-**Description:**  
-${issue.description}  
-
-**Suggestion:**  
-${issue.suggestion}`;
-
-      await octokit.rest.pulls.createReviewComment({
-        owner,
-        repo: repoName,
-        pull_number: prNumber,
-        commit_id: commitId,
-        path: issue.file,
-        line: issue.matched_line,
-        side: 'RIGHT',
-        body
-      });
-
-      console.log(`💬 Posted inline comment: ${issue.title}`);
-    }
-  } catch (err) {
-    console.error("❌ Error during AI review:", err.response?.data || err.message);
+    console.log(`💬 Posted inline comment: ${issue.title}`);
   }
 }
 

@@ -47,6 +47,8 @@ CRITICAL INSTRUCTIONS - FOLLOW EXACTLY:
 - DO NOT infer missing logic or auto-complete partial functions.
 - The 'code_snippet' field MUST BE AN EXACT COPY of the code shown in the diff.
 - Maintain original formatting, spacing, and indentation as-is.
+- Each "code_snippet" must refer to a single continuous block of code only.
+- Never include more than one function or separated code chunks in a single code_snippet field.
 
 JSON RESPONSE FORMAT:
 {

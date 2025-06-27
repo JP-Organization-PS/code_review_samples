@@ -16,8 +16,6 @@ const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
 const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
-const { execSync } = require('child_process');
-
 let diff = '';
 try {
   const base = process.env.GITHUB_BASE_REF || 'main';

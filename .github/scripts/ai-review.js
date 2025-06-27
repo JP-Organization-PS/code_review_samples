@@ -4,6 +4,7 @@ const { execSync } = require('child_process');
 const github = require('@actions/github');
 const fs = require('fs');
 const path = require('path');
+const stringSimilarity = require('string-similarity');
 
 const CONFIG = {
   model: process.env.AI_MODEL || 'gemini',
@@ -80,7 +81,27 @@ async function requestGemini(prompt) {
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
 }
 
-function matchSnippet(filePath, codeSnippet) {
+function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
+  if (!fs.existsSync(filePath)) return null;
+  const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+  const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());
+
+  for (let i = 0; i <= lines.length - snippetLines.length; i++) {
+    const window = lines.slice(i, i + snippetLines.length).map(l => l.trim());
+    const similarity = snippetLines.map((line, j) =>
+      stringSimilarity.compareTwoStrings(line, window[j])
+    );
+    const average = similarity.reduce((a, b) => a + b, 0) / similarity.length;
+
+    if (average >= threshold) {
+      return { start: i + 1, end: i + snippetLines.length };
+    }
+  }
+  return null;
+}
+
+
+function matchSnippet_old(filePath, codeSnippet) {
   if (!fs.existsSync(filePath)) return null;
   const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
   const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());

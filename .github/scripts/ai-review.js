@@ -182,12 +182,18 @@ async function reviewCode() {
     console.log("\n🔍 AI Code Review Output:\n");
     console.log(review);
 
+    // 🧼 Sanitize response: remove markdown fences
+    const cleaned = review
+    .replace(/```json/g, '')
+    .replace(/```/g, '')
+    .trim();
+
     let parsed;
     try {
-      parsed = JSON.parse(review);
+      parsed = JSON.parse(cleaned);
     } catch (err) {
       console.error("❌ Failed to parse AI response as JSON. Posting raw review.");
-      await postCommentToGitHubPR(review);
+      await postCommentToGitHubPR(cleaned);
       return;
     }
 

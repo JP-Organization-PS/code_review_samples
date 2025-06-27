@@ -191,15 +191,17 @@ async function reviewCode() {
       if (issue.severity === 'CRITICAL' || issue.severity === 'MAJOR') {
         severityLabel = '🔴 High Priority';
       } else if (issue.severity === 'MINOR') {
-        severityLabel = '🟠 Medium Pirority';
+        severityLabel = '🟠 Medium Priority';
       }
 
       const body = `### ${severityLabel}
-      **Issue:** ${issue.title}  
-      **Description:**  
-      ${issue.description}  
-      **Suggestion:**  
-      ${issue.suggestion}`;
+
+**Issue:** ${issue.title}  
+**Description:**  
+${issue.description}  
+
+**Suggestion:**  
+${issue.suggestion}`;
 
       await octokit.rest.pulls.createReviewComment({
         owner,

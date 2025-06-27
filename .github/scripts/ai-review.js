@@ -141,11 +141,10 @@ async function requestGemini(prompt) {
 }
 
 function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
-  const normalizedSnippet = normalizeCodeSnippet(codeSnippet);
   if (!fs.existsSync(filePath)) return null;
 
   const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-  const snippetLines = normalizedSnippet.trim().split('\n').map(line => line.trim());
+  const snippetLines = codeSnippet.trim().split('\n').map(line => line.trim());
 
   // First: Try exact match
   for (let i = 0; i <= lines.length - snippetLines.length; i++) {
@@ -264,9 +263,10 @@ async function reviewCode() {
   console.log(`Posted summary comment.`);
 
   for (const issue of issues) {
-    const result = matchSnippet(path.resolve(process.cwd(), issue.file), issue.code_snippet);
+    const normalizedSnippet = normalizeCodeSnippet(issue.code_snippet);
+    const result = matchSnippet(path.resolve(process.cwd(), issue.file), normalizedSnippet);
     if (!result) {
-      console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file} Snippet: ${issue.code_snippet}`);
+      console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file} Snippet: ${normalizedSnippet}`);
       continue;
     }
 

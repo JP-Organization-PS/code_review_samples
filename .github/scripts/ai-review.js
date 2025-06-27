@@ -183,7 +183,24 @@ async function reviewCode() {
 
     for (const issue of parsed.issues || []) {
       if (!issue.matched_line) continue;
-      const body = `**🤖 ${issue.title}**\n\n**Severity:** ${issue.severity}\n\n${issue.description}\n\n**Suggestion:**\n${issue.suggestion}`;
+      let bgColor = '#e6ffed'; // default green for LOW
+let severityLabel = 'LOW';
+if (issue.severity === 'CRITICAL' || issue.severity === 'MAJOR') {
+  bgColor = '#ffeef0'; // red for HIGH
+  severityLabel = 'HIGH';
+} else if (issue.severity === 'MINOR') {
+  bgColor = '#fff5b1'; // orange for MEDIUM
+  severityLabel = 'MEDIUM';
+}
+
+const body = `
+<div style="background-color:${bgColor}; padding:12px; border-radius:6px;">
+  <strong>🤖 ${issue.title}</strong><br/>
+  <strong>Severity:</strong> ${severityLabel}<br/><br/>
+  ${issue.description}<br/><br/>
+  <strong>Suggestion:</strong><br/>
+  ${issue.suggestion}
+</div>`;
 
       await octokit.rest.pulls.createReviewComment({
         owner,

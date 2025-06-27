@@ -194,7 +194,7 @@ async function reviewCode() {
         severityLabel = '🟠 Medium Priority';
       }
 
-      const body = `# ${severityLabel}
+      const body = `#### ${severityLabel}
 
 **Issue:** ${issue.title}  
 **Description:**  

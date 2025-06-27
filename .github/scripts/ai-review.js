@@ -142,7 +142,7 @@ async function reviewCode() {
   for (const issue of issues) {
     const result = matchSnippet(path.resolve(process.cwd(), issue.file), issue.code_snippet);
     if (!result) {
-      console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file}`);
+      console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file} Snippet: ${issue.code_snippet}`);
       continue;
     }
 

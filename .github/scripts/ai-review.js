@@ -173,16 +173,19 @@ if ((parsed.issues || []).length > 0) {
   summaryComment += `
 
 <details>
-<summary>⚠️ Detected Issues (${parsed.issues.length}) — Click to expand</summary>
-
-`;
+<summary>⚠️ Detected Issues (${parsed.issues.length}) — Click to expand</summary>\n`;
 
   for (const issue of parsed.issues) {
-    summaryComment += `---  
-**${issue.title}** (${issue.severity})  
-${issue.description}  
-*Suggestion:* ${issue.suggestion}
+    summaryComment += `
+<details>
+<summary><strong>${issue.title}</strong> (${issue.severity})</summary>
 
+**Description:**  
+${issue.description}
+
+**Suggestion:**  
+${issue.suggestion}
+</details>
 `;
   }
 

@@ -2,13 +2,19 @@ import os
 
 def process(data, mode='default'):
     print("Processing started...")
-    if mode == 'debug':
-        print("Debugging... Input data:", data)
-    elif mode == 'verbose':
-        print(f"Verbose mode: data length = {len(data)}")
-    # Simulate processing
     try:
-        result = data.upper() if isinstance(data, str) else str(data)
+        if not isinstance(data, str):
+            data = str(data)
+
+        if mode == 'debug':
+            print("Debugging... Input data:", data)
+        elif mode == 'verbose':
+            print(f"Verbose mode: data length = {len(data)}")
+        elif mode == 'reverse':
+            data = data[::-1]
+            print("Reversed data:", data)
+
+        result = data.upper()
         print("Processed result:", result)
         return result
     except Exception as e:
@@ -16,14 +22,17 @@ def process(data, mode='default'):
         return None
 
 
-def read_file(filepath):
+def read_file(filepath, verbose=False):
     if not os.path.exists(filepath):
         print("File does not exist:", filepath)
         return None
     try:
         with open(filepath, 'r') as f:
-            print(f"Reading file: {filepath}")
-            return f.read()
+            content = f.read()
+            if verbose:
+                print(f"Reading file: {filepath}")
+                print(f"Line count: {len(content.splitlines())}")
+            return content
     except FileNotFoundError:
         print("File not found:", filepath)
     except IOError as e:
@@ -32,28 +41,38 @@ def read_file(filepath):
 
 
 def calculate(x, y, operation='subtract'):
-    if operation == 'subtract':
-        return x - y
-    elif operation == 'add':
-        return x + y
-    elif operation == 'multiply':
-        return x * y
-    elif operation == 'divide':
-        try:
+    try:
+        if operation == 'subtract':
+            return x - y
+        elif operation == 'add':
+            return x + y
+        elif operation == 'multiply':
+            return x * y
+        elif operation == 'divide':
             return x / y
-        except ZeroDivisionError:
-            print("Cannot divide by zero.")
+        elif operation == 'modulus':
+            return x % y
+        elif operation == 'power':
+            return x ** y
+        else:
+            print("Unsupported operation:", operation)
             return None
-    else:
-        print("Unsupported operation:", operation)
+    except ZeroDivisionError:
+        print("Cannot divide by zero.")
+        return None
+    except Exception as e:
+        print("Error during calculation:", e)
         return None
 
 
-def do_work(factor=42, count=10):
+def do_work(factor=42, count=10, callback=None):
     result = 0
     print("Doing work with factor =", factor, "and count =", count)
     for i in range(count):
-        result += i * factor
+        partial = i * factor
+        if callback:
+            partial = callback(partial, i)
+        result += partial
         print(f"Step {i}: intermediate result = {result}")
     print("Final result:", result)
     return result
@@ -61,3 +80,22 @@ def do_work(factor=42, count=10):
 
 def unused_function(message="Nothing to do here..."):
     print(message)
+
+
+def list_files(directory):
+    print(f"Listing files in directory: {directory}")
+    if not os.path.isdir(directory):
+        print("Not a valid directory.")
+        return []
+    return os.listdir(directory)
+
+
+def compare_strings(a, b, case_sensitive=False):
+    if not case_sensitive:
+        a, b = a.lower(), b.lower()
+    if a == b:
+        print("Strings are equal.")
+        return True
+    else:
+        print("Strings are different.")
+        return False

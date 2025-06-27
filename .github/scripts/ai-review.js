@@ -17,39 +17,25 @@ const geminiKey = process.env.GEMINI_API_KEY;
 const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${geminiKey}`;
 
 // === GET GIT DIFF for Last N Commits in PR Branch === //
+// === GET GIT DIFF: PR-safe and accurate === //
 let diff = '';
 try {
   const base = process.env.GITHUB_BASE_REF || 'main';
-  const numCommits = 2;
 
-  // Fetch base branch to ensure it's available locally
+  // Ensure base branch is available
   execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
 
-  // Get commits exclusive to PR branch (i.e., commits after base)
-  const commits = execSync(`git rev-list origin/${base}..HEAD --reverse`)
-    .toString()
-    .trim()
-    .split('\n');
-
-  if (commits.length === 0) {
-    console.log("⚠️ No commits found in PR branch. Skipping AI review.");
-    process.exit(0);
-  }
-
-  const startCommit =
-    commits.length >= numCommits
-      ? commits[commits.length - numCommits]
-      : commits[0];
-
-  // Diff from that commit to HEAD to include all N recent PR commits
-  diff = execSync(`git diff ${startCommit} HEAD`, { stdio: 'pipe' }).toString();
+  // Get diff of all changes introduced by PR branch vs base
+  diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
 
   if (!diff.trim()) {
-    console.log("✅ No changes found in the last PR commits. Skipping AI review.");
+    console.log("✅ No changes found in PR. Skipping AI review.");
     process.exit(0);
   }
+
+  console.log("✅ Diff generated from PR changes.");
 } catch (e) {
-  console.error("❌ Failed to get diff from recent PR commits:", e.message);
+  console.error("❌ Failed to get diff from PR branch:", e.message);
   process.exit(1);
 }
 

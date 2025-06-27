@@ -182,26 +182,26 @@ if ((parsed.issues || []).length > 0) {
     else if (issue.severity === 'INFO') severityEmoji = '🔵';
 
     summaryComment += `
-&nbsp;&nbsp;&nbsp;<details>
-<summary><strong>${severityEmoji} ${issue.title}</strong> <em>(${issue.severity})</em></summary>
+- <details>
+  <summary><strong>${severityEmoji} ${issue.title}</strong> <em>(${issue.severity})</em></summary>
 
-**📁 File:** \`${issue.file}\`  
-**🔢 Line:** ${issue.line || 'N/A'}
+  **📁 File:** \`${issue.file}\`  
+  **🔢 Line:** ${issue.line || 'N/A'}
 
----
+  ---
 
-**📝 Description:**  
-${issue.description}
+  **📝 Description:**  
+  ${issue.description}
 
-**💡 Suggestion:**  
-${issue.suggestion}
+  **💡 Suggestion:**  
+  ${issue.suggestion}
 
-</details>
-`;
+  </details>`;
   }
 
   summaryComment += `\n</details>\n`;
 }
+
 
 
 

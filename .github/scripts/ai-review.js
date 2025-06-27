@@ -25,13 +25,13 @@ function getGitDiff() {
     execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
     const diff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
     if (!diff.trim()) {
-      console.log("✅ No changes found in PR. Skipping AI review.");
+      console.log("No changes found in PR. Skipping AI review.");
       process.exit(0);
     }
-    console.log("✅ Diff generated from PR changes.");
+    console.log("Diff generated from PR changes.");
     return diff;
   } catch (e) {
-    console.error("❌ Failed to get diff from PR branch:", e.message);
+    console.error("Failed to get diff from PR branch:", e.message);
     process.exit(1);
   }
 }
@@ -41,6 +41,14 @@ function buildPrompt(diff) {
 
 Please review the following code diff and respond in strict JSON format.
 
+VERY IMPORTANT:
+- Do not rewrite or reformat code snippets.
+- Do not add extra lines (e.g., inner try-except, print statements, comments).
+- When including the 'code_snippet', copy the snippet **exactly as shown** in the diff.
+- Preserve indentation and formatting.
+- Your response must only reflect the original code — do not "fix" or "complete" any functions.
+
+Your JSON output must follow this format:
 { "overall_summary": "...", "positive_aspects": ["..."], "issues": [{ "severity": "...", "title": "...", "description": "...", "suggestion": "...", "file": "...", "line": "...", "code_snippet": "..." }] }
 
 Respond with only a single valid JSON object. No Markdown, headers, or commentary.
@@ -83,9 +91,20 @@ async function requestGemini(prompt) {
 
 function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
   if (!fs.existsSync(filePath)) return null;
+
   const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
   const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());
 
+  // First: Try exact match
+  for (let i = 0; i <= lines.length - snippetLines.length; i++) {
+    const window = lines.slice(i, i + snippetLines.length).map(l => l.trim());
+    const exactMatch = snippetLines.every((line, j) => window[j] === line);
+    if (exactMatch) {
+      return { start: i + 1, end: i + snippetLines.length };
+    }
+  }
+
+  // Fallback: Try fuzzy matching
   for (let i = 0; i <= lines.length - snippetLines.length; i++) {
     const window = lines.slice(i, i + snippetLines.length).map(l => l.trim());
     const similarity = snippetLines.map((line, j) =>
@@ -97,9 +116,9 @@ function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
       return { start: i + 1, end: i + snippetLines.length };
     }
   }
+
   return null;
 }
-
 
 function matchSnippet_old(filePath, codeSnippet) {
   if (!fs.existsSync(filePath)) return null;
@@ -120,7 +139,6 @@ function matchSnippet_old(filePath, codeSnippet) {
   }
   return null;
 }
-
 
 async function reviewCode() {
   const diff = getGitDiff();

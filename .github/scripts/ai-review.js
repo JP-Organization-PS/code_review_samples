@@ -50,17 +50,17 @@ CRITICAL INSTRUCTIONS – FOLLOW EXACTLY:
 
 JSON RESPONSE FORMAT:
 {
-  "overall_summary": "...",
-  "highlights": ["..."],
+  "overall_summary": "A brief summary of the change and your general impression.",
+  "highlights": ["Highlight any good practices or improvements made."],
   "issues": [
     {
-      "severity": "...",
+      "severity": "Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion.",
       "title": "...",
-      "description": "...",
-      "suggestion": "...",
+      "description": "Mention any bugs, anti-patterns, security concerns, or performance problems",
+      "suggestion": "Recommend improvements, better design patterns, or more idiomatic approaches.",
       "file": "...",
       "line": "...",
-      "code_snippet": "..."
+      "code_snippet": "This field MUST BE AN EXACT COPY of the original code diff. DO NOT add, remove, reformat, or auto-correct code snippets."
     }
   ]
 }

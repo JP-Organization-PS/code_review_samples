@@ -163,15 +163,30 @@ async function reviewCode() {
   const prNumber = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/)?.[1];
   const commitId = github.context.payload.pull_request.head.sha;
 
-  let summary = `### AI Code Review Summary\n\n**📝 Overall Summary:**  \n${overall_summary}\n\n**✅ Positive Aspects:**  \n${positive_aspects.map(p => `- ${p}`).join('\n')}`;
+  let summary = `### AI Code Review Summary\n\n**📝 Overall Summary:**  \n${overall_summary}\n\n**✅ Highlights:**  \n${positive_aspects.map(p => `- ${p}`).join('\n')}`;
 
   if (issues.length) {
     summary += `\n\n<details>\n<summary>⚠️ <strong>Detected Issues (${issues.length})</strong> — Click to expand</summary><br>\n`;
-    for (const issue of issues) {
-      const emoji = issue.severity === 'CRITICAL' || issue.severity === 'MAJOR' ? '🔴' : issue.severity === 'MINOR' ? '🟠' : issue.severity === 'INFO' ? '🔵' : '🟢';
-      summary += `
+  for (const issue of issues) {
+    let emoji = '🟢';
+    let severityLabel = 'Low Priority';
+
+    if (issue.severity === 'CRITICAL') {
+      emoji = '🔴';
+      severityLabel = 'Critical Priority';
+    } else if (issue.severity === 'MAJOR') {
+      emoji = '🔴';
+      severityLabel = 'High Priority';
+    } else if (issue.severity === 'MINOR') {
+      emoji = '🟠';
+      severityLabel = 'Medium Priority';
+    } else if (issue.severity === 'INFO') {
+      emoji = '🔵';
+      severityLabel = 'Informational';
+    }
+    summary += `
 - <details>
-  <summary><strong>${emoji} ${issue.title}</strong> <em>(${issue.severity})</em></summary>
+  <summary><strong>${emoji} ${issue.title}</strong> <em>(${severityLabel})</em></summary>
 
   **📁 File:** \`${issue.file}\`  
   **🔢 Line:** ${issue.line || 'N/A'}
@@ -208,7 +223,7 @@ async function reviewCode() {
       : issue.severity === 'MINOR'
         ? '🟠 Medium Priority'
         : issue.severity === 'INFO'
-          ? '🔵 Info'
+          ? '🔵 Informational'
           : '🟢 Low Priority';
 
     const body = `#### ${priority}\n\n**Issue: ${issue.title}**  \n${issue.description}  \n\n**Suggestion:**  \n${issue.suggestion}`;

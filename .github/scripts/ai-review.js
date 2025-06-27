@@ -35,8 +35,7 @@ try {
 }
 
 // === PROMPT === //
-const prompt = `
-You are an expert software engineer and code reviewer specializing in clean code, security, performance, and maintainability.
+const prompt = `You are an expert software engineer and code reviewer specializing in clean code, security, performance, and maintainability.
 
 Please review the following code diff and respond in **strict JSON format**.
 
@@ -61,10 +60,7 @@ Your JSON output must follow this structure:
 Respond with only a single valid JSON object. No Markdown, headers, or commentary.
 
 Here is the code diff:
-\`\`\`diff
-${diff}
-\`\`\`
-`;
+\`\`\`diff\n${diff}\n\`\`\``;
 
 // === AI Clients === //
 async function runWithAzureOpenAI() {
@@ -138,39 +134,6 @@ function matchSnippetInFile(filePath, codeSnippet) {
   return null;
 }
 
-// === Post PR Comment === //
-async function postCommentToGitHubPR(reviewText) {
-  try {
-    const token = process.env.GITHUB_TOKEN;
-    if (!token) throw new Error("GITHUB_TOKEN is not set.");
-
-    const octokit = github.getOctokit(token);
-    const repo = process.env.GITHUB_REPOSITORY;
-    const ref = process.env.GITHUB_REF;
-
-    if (!repo || !ref) throw new Error("GITHUB_REPOSITORY or GITHUB_REF is not set.");
-
-    const [owner, repoName] = repo.split('/');
-    const match = ref.match(/refs\/pull\/(\d+)\/merge/);
-    const prNumber = match?.[1];
-
-    if (!prNumber) throw new Error("Cannot determine PR number from GITHUB_REF.");
-
-    const body = `### 🤖 Gemini AI Code Review\n\n**Summary:**\n\n\`\`\`\n${reviewText}\n\`\`\``;
-
-    await octokit.rest.issues.createComment({
-      owner,
-      repo: repoName,
-      issue_number: prNumber,
-      body
-    });
-
-    console.log(`✅ Posted AI review as PR comment on #${prNumber}`);
-  } catch (err) {
-    console.error("❌ Failed to post comment to GitHub PR:", err.message);
-  }
-}
-
 // === Main Logic === //
 async function reviewCode() {
   try {
@@ -196,6 +159,7 @@ async function reviewCode() {
     console.log(cleaned);
 
     const parsed = JSON.parse(cleaned);
+
     const token = process.env.GITHUB_TOKEN;
     const octokit = github.getOctokit(token);
     const repo = process.env.GITHUB_REPOSITORY;
@@ -218,33 +182,22 @@ async function reviewCode() {
     }
 
     for (const issue of parsed.issues || []) {
-      if (!issue.matched_line) continue; // Skip unmatched
+      if (!issue.matched_line) continue;
+      const body = `**🤖 ${issue.title}**\n\n**Severity:** ${issue.severity}\n\n${issue.description}\n\n**Suggestion:**\n${issue.suggestion}`;
 
-      const body = `**🤖 ${issue.title}**  
-**Severity:** ${issue.severity}  
-${issue.description}  
-  
-**Suggestion:**  
-${issue.suggestion}`;
+      await octokit.rest.pulls.createReviewComment({
+        owner,
+        repo: repoName,
+        pull_number: prNumber,
+        commit_id: commitId,
+        path: issue.file,
+        line: issue.matched_line,
+        side: 'RIGHT',
+        body
+      });
 
-      try {
-        await octokit.rest.pulls.createReviewComment({
-          owner,
-          repo: repoName,
-          pull_number: prNumber,
-          commit_id: commitId,
-          path: issue.file,
-          line: issue.matched_line,
-          side: 'RIGHT',
-          body
-        });
-
-        console.log(`💬 Posted inline comment: ${issue.title}`);
-      } catch (err) {
-        console.warn(`⚠️ Could not post comment for "${issue.title}": ${err.message}`);
-      }
+      console.log(`💬 Posted inline comment: ${issue.title}`);
     }
-
   } catch (err) {
     console.error("❌ Error during AI review:", err.response?.data || err.message);
   }

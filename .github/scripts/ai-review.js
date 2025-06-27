@@ -201,7 +201,7 @@ async function reviewCode() {
           ? '🔵 Info'
           : '🟢 Low Priority';
 
-    const body = `#### ${priority} - ${issue.title}\n\n**Issue:**  \n${issue.description}  \n\n**Suggestion:**  \n${issue.suggestion}`;
+    const body = `#### ${priority}\n\n**Issue: ${issue.title}**  \n${issue.description}  \n\n**Suggestion:**  \n${issue.suggestion}`;
 
     await octokit.rest.pulls.createReviewComment({
       owner,

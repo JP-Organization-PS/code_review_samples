@@ -195,23 +195,55 @@ async function reviewCode() {
     console.log("\n🔍 Cleaned JSON Output:\n");
     console.log(cleaned);
 
-    let parsed = JSON.parse(cleaned);
+    const parsed = JSON.parse(cleaned);
+    const token = process.env.GITHUB_TOKEN;
+    const octokit = github.getOctokit(token);
+    const repo = process.env.GITHUB_REPOSITORY;
+    const ref = process.env.GITHUB_REF;
+    const [owner, repoName] = repo.split('/');
+    const match = ref.match(/refs\/pull\/(\d+)\/merge/);
+    const prNumber = match?.[1];
+    const commitId = github.context.payload.pull_request.head.sha;
 
     for (const issue of parsed.issues || []) {
-      console.log("\n🔍 Parsed Issues:\n");
-      console.log(issue);
       const filePath = path.resolve(process.cwd(), issue.file);
       const result = matchSnippetInFile(filePath, issue.code_snippet);
       if (result) {
-        issue.matched_line_range = `${result.start}-${result.end}`;
-        console.log(`✅ Matched \"${issue.title}\" at ${issue.file}:${issue.matched_line_range}`);
+        issue.matched_line = result.start;
+        console.log(`✅ Matched "${issue.title}" at ${issue.file}:${result.start}`);
       } else {
-        issue.matched_line_range = null;
-        console.warn(`❌ Could not match snippet for \"${issue.title}\" in ${issue.file}`);
+        issue.matched_line = null;
+        console.warn(`❌ Could not match snippet for "${issue.title}" in ${issue.file}`);
       }
     }
 
-    await postCommentToGitHubPR(cleaned);
+    for (const issue of parsed.issues || []) {
+      if (!issue.matched_line) continue; // Skip unmatched
+
+      const body = `**🤖 ${issue.title}**  
+**Severity:** ${issue.severity}  
+${issue.description}  
+  
+**Suggestion:**  
+${issue.suggestion}`;
+
+      try {
+        await octokit.rest.pulls.createReviewComment({
+          owner,
+          repo: repoName,
+          pull_number: prNumber,
+          commit_id: commitId,
+          path: issue.file,
+          line: issue.matched_line,
+          side: 'RIGHT',
+          body
+        });
+
+        console.log(`💬 Posted inline comment: ${issue.title}`);
+      } catch (err) {
+        console.warn(`⚠️ Could not post comment for "${issue.title}": ${err.message}`);
+      }
+    }
 
   } catch (err) {
     console.error("❌ Error during AI review:", err.response?.data || err.message);

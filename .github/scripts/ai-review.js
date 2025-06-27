@@ -99,13 +99,28 @@ async function requestGemini(prompt) {
   const res = await axios.post(
     CONFIG.gemini.endpoint,
     {
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: 8192 },
+      contents: [
+        {
+          role: 'system',
+          parts: [
+            {
+              text: 'You are a precise code reviewer. NEVER modify or improve code snippets from the user. The code_snippet field must be an exact copy of the original code diff. DO NOT add, remove, reformat, or auto-correct code snippets.'
+            }
+          ]
+        },
+        {
+          role: 'user',
+          parts: [{ text: prompt }]
+        }
+      ],
+      generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: 8192 }
     },
     { headers: { 'Content-Type': 'application/json' } }
   );
+
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
 }
+
 
 function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
   if (!fs.existsSync(filePath)) return null;

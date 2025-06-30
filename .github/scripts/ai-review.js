@@ -171,6 +171,8 @@ async function reviewCode() {
   const prompt = buildPrompt(diff);
   const review = CONFIG.model === 'azure' ? await requestAzure(prompt) : await requestGemini(prompt);
 
+  console.log(`AI Review ouput before parsing: ${review}`);
+
   const cleaned = review
   .replace(/[`\\]+/g, '')
   .trim();

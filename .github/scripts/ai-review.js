@@ -172,9 +172,7 @@ async function reviewCode() {
   const review = CONFIG.model === 'azure' ? await requestAzure(prompt) : await requestGemini(prompt);
 
   const cleaned = review
-  .replace(/```json/g, '')
-  .replace(/```/g, '')
-  .replace(/\\`/g, '`')
+  .replace(/[`\\]+/g, '')
   .trim();
 
   const parsed = JSON.parse(cleaned);

@@ -11,11 +11,12 @@ permissions:
 jobs:
   ai_review:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # needed for full git history to access base branch
+          fetch-depth: 0  # Required to get full commit history and HEAD^
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

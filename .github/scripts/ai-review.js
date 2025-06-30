@@ -19,9 +19,6 @@ const CONFIG = {
   },
 };
 
-const fs = require('fs');
-const { execSync } = require('child_process');
-
 function getGitDiff() {
   try {
     const base = process.env.GITHUB_BASE_REF;

@@ -52,7 +52,7 @@ function getGitDiff() {
       };
     }
 
-    if (action === 'synchronize') {
+    if (action === 'synchronize_test') {
       console.log("PR updated with new commits → performing latest commit vs main diff.");
 
       let latestCommitDiff;
@@ -92,8 +92,21 @@ IMPORTANT GUIDELINES:
 - Your response must reflect only the original code and must not attempt to fix or complete any functions.
 
 Your JSON response must follow this exact structure:
-{ "overall_summary": "...", "positive_aspects": ["..."], "issues": [{ "severity": "...", "title": "...", "description": "...", "suggestion": "...", "file": "...", "line": "...", "code_snippet": "..." }] }
-
+{
+  "overall_summary": "A brief summary of the change and your general impression.",
+  "highlights": ["Highlight any good practices or improvements made."],
+  "issues": [
+    {
+      "severity": "Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion.",
+      "title": "...",
+      "description": "Mention any bugs, anti-patterns, security concerns, or performance problems",
+      "suggestion": "Recommend improvements, better design patterns, or more idiomatic approaches.",
+      "file": "...",
+      "line": "...",
+      "code_snippet": "This field MUST BE AN EXACT COPY of the original code diff. DO NOT add, remove, reformat, or auto-correct code snippets."
+    }
+  ]
+}
 Respond with a single valid JSON object only. Do not include Markdown, code blocks, backticks, or any additional formatting.
 
 Here is the code diff:
@@ -171,7 +184,9 @@ async function reviewCode() {
   const prompt = buildPrompt(diff);
   const review = CONFIG.model === 'azure' ? await requestAzure(prompt) : await requestGemini(prompt);
 
+  console.log(`\n AI Review ouput Start \n`);
   console.log(`AI Review ouput before parsing: ${review}`);
+  console.log(`\n AI Review ouput End \n`);
 
   const cleaned = review
   .replace(/^```json\s*/i, '')         // remove opening ```json and optional whitespace

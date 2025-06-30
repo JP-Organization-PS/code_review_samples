@@ -174,8 +174,10 @@ async function reviewCode() {
   console.log(`AI Review ouput before parsing: ${review}`);
 
   const cleaned = review
-  .replace(/[`\\]+/g, '')
+  .replace(/^```json\s*/i, '')         // remove opening ```json and optional whitespace
+  .replace(/\s*```$/, '')              // remove closing ``` at the end
   .trim();
+
 
   const parsed = JSON.parse(cleaned);
   const { overall_summary, positive_aspects, issues = [] } = parsed;

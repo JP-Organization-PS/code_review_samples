@@ -56,22 +56,34 @@ function getGitDiff() {
     }
 
     if (action === 'synchronize') {
-      console.log("PR updated with new commits → performing latest commit vs main diff.");
+      console.log("PR updated with new commits → performing latest commit vs previous diff.");
       let latestCommitDiff;
       try {
         const latestCommit = execSync('git rev-parse HEAD').toString().trim();
-        latestCommitDiff = execSync(`git diff origin/${base} ${latestCommit}`, { stdio: 'pipe' }).toString();
+        const prevCommit = execSync('git rev-parse HEAD^').toString().trim();
+        latestCommitDiff = execSync(`git diff ${prevCommit} ${latestCommit}`, { stdio: 'pipe' }).toString();
+
+        const changedFiles = execSync(`git diff --name-only ${prevCommit} ${latestCommit}`, { encoding: 'utf-8' })
+          .split('\n')
+          .filter(Boolean);
+        console.log('Changed files:', changedFiles);
+
+        return {
+          reviewType: 'latest_commit_only',
+          diff: latestCommitDiff,
+          fullContext: execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString(),
+          changedFiles
+        };
       } catch (err) {
-        console.warn("Could not compare against base. Falling back to full diff.");
-        latestCommitDiff = fullDiff;
+        console.warn("Failed to diff latest commit. Falling back to full diff.");
+        return {
+          reviewType: 'full',
+          diff: fullDiff,
+          changedFiles
+        };
       }
-      return {
-        reviewType: 'latest_commit_vs_main',
-        diff: latestCommitDiff,
-        fullContext: fullDiff,
-        changedFiles
-      };
     }
+
 
     console.log(`Unhandled PR action: ${action}. Skipping AI review.`);
     process.exit(0);

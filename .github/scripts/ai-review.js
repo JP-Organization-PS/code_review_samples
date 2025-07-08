@@ -1,10 +1,9 @@
-// ai-review.js
 const axios = require('axios');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
 const fs = require('fs');
 const path = require('path');
-const stringSimilarity = require('string-similarity');
+const parse = require('parse-diff');
 
 const CONFIG = {
   model: process.env.AI_MODEL || 'gemini',
@@ -22,7 +21,6 @@ const CONFIG = {
 function getGitDiff() {
   try {
     const base = process.env.GITHUB_BASE_REF;
-
     if (!base) {
       console.log("Not a pull request context. Skipping AI review.");
       process.exit(0);
@@ -31,54 +29,42 @@ function getGitDiff() {
     const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
     const action = event.action;
 
-    console.log(`Detected PR action: ${action}`);
-    console.log(`Running diff against base branch: ${base}`);
-
-    execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
-
-    // Full PR diff
-    const fullDiff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
-
-    if (!fullDiff.trim()) {
-      console.log("No changes found in PR. Skipping AI review.");
+    if (action !== 'opened') {
+      console.log(`PR action is '${action}' — skipping AI review (only run on 'opened').`);
       process.exit(0);
     }
 
-    if (action === 'opened') {
-      console.log("PR opened → performing full diff review.");
-      return {
-        reviewType: 'full',
-        diff: fullDiff
-      };
+    console.log(`Detected PR action: ${action}`);
+    console.log(`Running full diff against base branch: ${base}`);
+
+    // Fetch latest base branch
+    execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
+
+    // Full diff between base branch and HEAD
+    const fullDiff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
+
+    const changedFiles = execSync(`git diff --name-only origin/${base}...HEAD`, { encoding: 'utf-8' })
+      .split('\n')
+      .filter(Boolean);
+
+    if (!fullDiff.trim() || changedFiles.length === 0) {
+      console.log("No changes detected in the PR. Skipping AI review.");
+      process.exit(0);
     }
 
-    if (action === 'synchronize_test') {
-      console.log("PR updated with new commits → performing latest commit vs main diff.");
+    console.log("Changed files:", changedFiles);
 
-      let latestCommitDiff;
-      try {
-        const latestCommit = execSync('git rev-parse HEAD').toString().trim();
-        latestCommitDiff = execSync(`git diff origin/${base} ${latestCommit}`, { stdio: 'pipe' }).toString();
-      } catch (err) {
-        console.warn("Could not compare against base. Falling back to full diff.");
-        latestCommitDiff = fullDiff;
-      }
-
-      return {
-        reviewType: 'latest_commit_vs_main',
-        diff: latestCommitDiff,
-        fullContext: fullDiff
-      };
-    }
-
-    console.log(`Unhandled PR action: ${action}. Skipping AI review.`);
-    process.exit(0);
-
+    return {
+      reviewType: 'pr_opened',
+      diff: fullDiff,
+      changedFiles
+    };
   } catch (e) {
     console.error("Failed to get diff from PR branch:", e.message);
     process.exit(1);
   }
 }
+
 
 function buildPrompt(diff) {
   return `You are an expert software engineer and code reviewer, specializing in clean code, security, performance, and maintainability.
@@ -89,12 +75,13 @@ IMPORTANT GUIDELINES:
 - Do not add any new lines (e.g., inner try-except, print statements, or comments).
 - When including a code_snippet, copy it exactly as shown in the diff.
 - Preserve the original indentation and formatting.
+- Do not reference files or functions that are not present in the provided diff.
 - Your response must reflect only the original code and must not attempt to fix or complete any functions.
 
 Your JSON response must follow this exact structure:
 {
   "overall_summary": "A brief summary of the change and your general impression.",
-  "highlights": ["Highlight any good practices or improvements made."],
+  "highlights": ["Provide detailed Highlighs about any good practices or improvements made."],
   "issues": [
     {
       "severity": "Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion.",
@@ -145,42 +132,36 @@ async function requestGemini(prompt) {
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
 }
 
-function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
-  if (!fs.existsSync(filePath)) return null;
+function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
+  const parsedFiles = parse(diffText);
+  const targetFile = parsedFiles.find(file => file.to === filePath || file.from === filePath);
 
-  const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+  if (!targetFile) {
+    console.warn(`File '${filePath}' not found in parsed diff.`);
+    return null;
+  }
+
   const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());
+  const flatChanges = targetFile.chunks.flatMap(chunk => chunk.changes)
+    .filter(change => change.add && typeof change.content === 'string');
 
-  // First: Try exact match
-  for (let i = 0; i <= lines.length - snippetLines.length; i++) {
-    const window = lines.slice(i, i + snippetLines.length).map(l => l.trim());
-    const exactMatch = snippetLines.every((line, j) => window[j] === line);
+  for (let i = 0; i <= flatChanges.length - snippetLines.length; i++) {
+    const window = flatChanges.slice(i, i + snippetLines.length).map(c => c.content.replace(/^\+/, '').trim());
+    const exactMatch = snippetLines.every((line, j) => line === window[j]);
     if (exactMatch) {
-      console.log(`Matched using exact logic at line ${i + 1}`);
-      return { start: i + 1, end: i + snippetLines.length };
+      const startLine = flatChanges[i].ln;
+      console.log(`Matched snippet in diff for file ${filePath} at line ${startLine}`);
+      return { start: startLine, end: startLine + snippetLines.length - 1 };
     }
   }
 
-  // Fallback: Try fuzzy matching
-  for (let i = 0; i <= lines.length - snippetLines.length; i++) {
-    const window = lines.slice(i, i + snippetLines.length).map(l => l.trim());
-    const similarity = snippetLines.map((line, j) =>
-      stringSimilarity.compareTwoStrings(line, window[j])
-    );
-    const average = similarity.reduce((a, b) => a + b, 0) / similarity.length;
-
-    if (average >= threshold) {
-      console.log(`Matched using fuzzy logic (score: ${average.toFixed(2)}) at line ${i + 1}`);
-      return { start: i + 1, end: i + snippetLines.length };
-    }
-  }
-
-  console.warn(`No match found for the code snippet:\n${codeSnippet}`);
+  console.warn(`No match found in diff for snippet in file: ${filePath}`);
   return null;
 }
 
 async function reviewCode() {
-  const { diff, reviewType, fullContext } = getGitDiff(); 
+  const { diff, reviewType, fullContext, changedFiles } = getGitDiff(); 
+
   const prompt = buildPrompt(diff);
   const review = CONFIG.model === 'azure' ? await requestAzure(prompt) : await requestGemini(prompt);
 
@@ -188,54 +169,48 @@ async function reviewCode() {
   console.log(`AI Review ouput before parsing: ${review}`);
   console.log(`\n AI Review ouput End \n`);
 
-  const cleaned = review
-  .replace(/^```json\s*/i, '')         // remove opening ```json and optional whitespace
-  .replace(/\s*```$/, '')              // remove closing ``` at the end
-  .trim();
+  const cleaned = review.replace(/```json|```/g, '').trim();
 
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (e) {
+    console.error("Failed to parse AI response JSON:", e.message);
+    process.exit(1);
+  }
 
-  const parsed = JSON.parse(cleaned);
-  const { overall_summary, positive_aspects, issues = [] } = parsed;
+  const { overall_summary, highlights = [], issues = [] } = parsed;
+  const filteredIssues = issues.filter(issue => changedFiles.includes(issue.file));
 
   const octokit = github.getOctokit(process.env.GITHUB_TOKEN);
   const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
-  const prNumber = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/)?.[1];
-  const commitId = github.context.payload.pull_request.head.sha;
+  const prNumber = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/)?.[1] ||
+                   github.context.payload.pull_request?.number;
+  const commitId = github.context.payload.pull_request?.head?.sha;
 
-  let summary = `### AI Code Review Summary\n\n**📝 Overall Summary:**  \n${overall_summary}\n\n**✅ Highlights:**  \n${positive_aspects.map(p => `- ${p}`).join('\n')}`;
+  let summary = `### AI Code Review Summary\n\n**📝 Overall Summary:**  \n${overall_summary}\n\n**✅ Highlights:**  \n${highlights.map(p => `- ${p}`).join('\n')}`;
 
-  if (issues.length) {
-    summary += `\n\n<details>\n<summary>⚠️ <strong>Detected Issues (${issues.length})</strong> — Click to expand</summary><br>\n`;
-  for (const issue of issues) {
-    let emoji = '🟢';
-    let severityLabel = 'Low Priority';
+  if (filteredIssues.length) {
+    summary += `\n\n<details>\n<summary>⚠️ <strong>Detected Issues (${filteredIssues.length})</strong> — Click to expand</summary><br>\n`;
+    for (const issue of filteredIssues) {
+      let emoji = '🟢';
+      let severityLabel = 'Low Priority';
 
-    if (issue.severity === 'CRITICAL') {
-      emoji = '🔴';
-      severityLabel = 'Critical Priority';
-    } else if (issue.severity === 'MAJOR') {
-      emoji = '🔴';
-      severityLabel = 'High Priority';
-    } else if (issue.severity === 'MINOR') {
-      emoji = '🟠';
-      severityLabel = 'Medium Priority';
-    } else if (issue.severity === 'INFO') {
-      emoji = '🔵';
-      severityLabel = 'Informational';
-    }
-    summary += `
-- <details>
-  <summary><strong>${emoji} ${issue.title}</strong> <em>(${severityLabel})</em></summary>
+      if (issue.severity === 'CRITICAL') {
+        emoji = '🔴';
+        severityLabel = 'Critical Priority';
+      } else if (issue.severity === 'MAJOR') {
+        emoji = '🔴';
+        severityLabel = 'High Priority';
+      } else if (issue.severity === 'MINOR') {
+        emoji = '🟠';
+        severityLabel = 'Medium Priority';
+      } else if (issue.severity === 'INFO') {
+        emoji = '🔵';
+        severityLabel = 'Informational';
+      }
 
-  **📁 File:** \`${issue.file}\`  
-  **🔢 Line:** ${issue.line || 'N/A'}
-
-  **📝 Description:**  
-  ${issue.description}
-
-  **💡 Suggestion:**  
-  ${issue.suggestion}
-  </details>`;
+      summary += `\n- <details>\n  <summary><strong>${emoji} ${issue.title}</strong> <em>(${severityLabel})</em></summary>\n\n  **📁 File:** \`${issue.file}\`  \n  **🔢 Line:** ${issue.line || 'N/A'}\n\n  **📝 Description:**  \n  ${issue.description}\n\n  **💡 Suggestion:**  \n  ${issue.suggestion}\n  </details>`;
     }
     summary += `\n</details>`;
   }
@@ -250,10 +225,10 @@ async function reviewCode() {
   });
   console.log(`Posted summary comment.`);
 
-  for (const issue of issues) {
-    const result = matchSnippet(path.resolve(process.cwd(), issue.file), issue.code_snippet);
+  for (const issue of filteredIssues) {
+    const result = matchSnippetFromDiff(fullContext || diff, issue.file, issue.code_snippet);
     if (!result) {
-      console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file} Snippet: ${issue.code_snippet}`);
+      console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file}`);
       continue;
     }
 

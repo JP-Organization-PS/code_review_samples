@@ -194,11 +194,7 @@ async function reviewCode() {
   console.log(`AI Review ouput before parsing: ${review}`);
   console.log(`\n AI Review ouput End \n`);
 
-  const cleaned = review
-  .replace(/```json/, '')           // remove starting block
-  .replace(/```$/, '')              // remove ending block if at very end
-  .replace(/\n```[\s\S]*$/, '')     // strip trailing triple backtick and anything after
-  .trim();
+  const cleaned = review.replace(/```json|```/g, '').trim();
 
   let parsed;
   try {

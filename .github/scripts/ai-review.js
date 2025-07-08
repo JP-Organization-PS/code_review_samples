@@ -94,7 +94,8 @@ IMPORTANT GUIDELINES FOR YOUR ANALYSIS AND OUTPUT:
 - **Maximal Issue Identification (No Exceptions)**: Leave no stone unturned. Analyze *every line and every aspect* of the code shown within the diff's full function/class context. Report absolutely everything you find. Be particularly aggressive in identifying potential runtime failures, resource exhaustion, security vulnerabilities (including subtle DoS vectors), numerical instabilities, and performance degradations under valid but extreme or problematic inputs.
 - **Contextual Analysis**: Your analysis must extend beyond just the changed lines. Consider the entire function, method, or code block provided in the diff to understand its purpose, interactions, and potential flaws.
 - **Strict Code Snippet Copy**: The 'code_snippet' field MUST BE AN EXACT, UNMODIFIED COPY of the original problematic code lines from the provided diff. Do NOT add, remove, reformat, or auto-correct any part of the 'code_snippet'. Its purpose is solely to point precisely to the original code where the issue resides.
-- **Comprehensive Suggestions**: For every single issue identified, you MUST provide a clear, actionable 'suggestion' for improvement. Your suggestions *can and should* include full refactored code examples, alternative implementations, new lines of code, or different design patterns. These suggestions are NOT limited to the lines changed in the diff but are direct improvements for the issue found within the 'code_snippet' and its surrounding context.
+- **Comprehensive Suggestions**: For every single issue identified, you MUST provide a clear, actionable 'suggestion' for improvement.
+- **Separate Proposed Code Snippet**: If the suggestion involves code changes, the 'proposed_code_snippet' field MUST contain the full proposed code block. This code should be properly formatted and ready for direct use. If there is no code change suggested, this field should be an empty string "".
 - **Detailed Explanations**: For each issue, provide a clear, concise, and thorough 'description' of the problem, its root cause, and its potential impact (e.g., data corruption, performance degradation, security breach, maintainability burden). In the 'suggestion' field, explain the 'why' and 'benefit' of your proposed change, including the rationale for any new code.
 - **No External References**: Do not reference files, functions, or concepts that are not explicitly present within the provided diff's context.
 - **Focus on Provided Code**: All identified issues and suggestions must be directly observable or logically inferable from the code provided in the diff.
@@ -110,10 +111,11 @@ Your JSON response must follow this exact structure:
       "severity": "Assign the most appropriate severity tag from: [INFO], [MINOR], [MAJOR], [CRITICAL]. Use [INFO] **liberally** for even very minor style, readability, micro-optimizations, or best practice suggestions. Use [CRITICAL] for immediate, show-stopping bugs, severe security vulnerabilities, or guaranteed crashes/resource exhaustion.",
       "title": "A concise and highly descriptive title for the issue (e.g., 'Missing Input Type/Range Validation', 'Broad Exception Catch Masking Errors', 'Potential Floating-Point Imprecision', 'Unbounded Computation for Large Exponents', 'Inconsistent Naming Convention').",
       "description": "A detailed explanation of the problem, its root cause, and its potential impact (e.g., 'This can lead to a denial-of-service attack due to unbounded computation time when Y is large.'). Be explicit about why it's an issue and the real-world consequences.",
-      "suggestion": "A clear, actionable recommendation for improvement, including concise code examples if applicable. Explain the benefits of the suggested change and how it effectively addresses the identified issue. Include best practices, alternative design patterns, or library recommendations.",
+      "suggestion": "A clear, actionable recommendation for improvement, explaining the benefits of the suggested change and how it effectively addresses the identified issue. Refer to the 'proposed_code_snippet' for implementation details. Include best practices, alternative design patterns, or library recommendations.",
       "file": "The file name containing the issue (e.g., 'my_module.py').",
       "line": "The starting line number of the issue in the original code (NOT the diff line number).",
       "code_snippet": "This field MUST BE AN EXACT COPY of the original code snippet (from the diff) that contains the issue. DO NOT add, remove, reformat, or auto-correct code snippets."
+      "proposed_code_snippet": "The full proposed code block to fix the issue, ready for direct use. If no code change is suggested, this field should be an empty string ''. Example: def new_function():\\n    pass"
     }
   ]
 }
@@ -263,7 +265,17 @@ async function reviewCode() {
           ? '🔵 Informational'
           : '🟢 Low Priority';
 
-    const body = `#### ${priority}\n\n**Issue: ${issue.title}**  \n${issue.description}  \n\n**Suggestion:**  \n${issue.suggestion}`;
+    const body = `#### ${priority}
+
+    **Issue:** ${issue.title}  
+    ${issue.description}
+
+    **Suggestion:**  
+    ${issue.suggestion}
+
+    \`\`\`js
+    ${issue.proposed_code_snippet || '// No code change suggested.'}
+    \`\`\``;
 
     await octokit.rest.pulls.createReviewComment({
       owner,

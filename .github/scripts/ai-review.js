@@ -46,7 +46,7 @@ function getGitDiff() {
       )
     );
 
-    console.log("Changed files:", changedFiles);
+    console.log("Updated this to check Changed files:", changedFiles);
 
     return {
       reviewType: 'latest_commit_only',

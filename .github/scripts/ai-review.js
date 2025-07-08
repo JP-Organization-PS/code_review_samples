@@ -273,7 +273,7 @@ async function reviewCode() {
       path: issue.file,
       line: result.start,
       side: 'RIGHT',
-      body: `#### Suggestion\n\n\`\`\`diff\n${issue.suggestion}\n\`\`\``
+      body,
     });
     console.log(`Posted inline comment: ${issue.title}`);
   }

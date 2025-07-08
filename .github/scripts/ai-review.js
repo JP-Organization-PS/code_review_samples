@@ -93,13 +93,13 @@ Your JSON response must follow this exact structure:
   ]
   "issues": [
     {
-      "severity": "Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion.",
-      "title": "...",
-      "description": "Mention any bugs, anti-patterns, security concerns, or performance problems",
-      "suggestion": "Recommend improvements, better design patterns, or more idiomatic approaches.",
-      "file": "...",
-      "line": "...",
-      "code_snippet": "This field MUST BE AN EXACT COPY of the original code diff. DO NOT add, remove, reformat, or auto-correct code snippets."
+      "severity": "[INFO], [MINOR], [MAJOR], or [CRITICAL]",
+      "title": "Short description of the issue",
+      "description": "Explain the concern (e.g., bug, anti-pattern, security risk, performance problem)",
+      "suggestion": "Recommend a solution or best practice",
+      "file": "Exact relative file path (e.g., src/utils/logger.js)",
+      "line": "Line number if known, or 'N/A'",
+      "code_snippet": "Must be an EXACT copy from the diff. Do NOT modify or reformat."
     }
   ]
 }

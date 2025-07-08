@@ -31,62 +31,29 @@ function getGitDiff() {
 
     console.log(`Detected PR action: ${action}`);
     console.log(`Running diff against base branch: ${base}`);
-
     execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
 
-    const fullDiff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
-    const changedFiles = execSync(`git diff --name-only origin/${base}...HEAD`, { encoding: 'utf-8' })
-      .split('\n')
-      .filter(Boolean);
+    const latestCommit = execSync('git rev-parse HEAD').toString().trim();
+    const prevCommit = execSync('git rev-parse HEAD^').toString().trim();
+    const latestCommitDiff = execSync(`git diff ${prevCommit} ${latestCommit}`, { stdio: 'pipe' }).toString();
+
+    const changedFiles = Array.from(
+      new Set(
+        latestCommitDiff
+          .split('\n')
+          .filter(line => line.startsWith('+++ b/'))
+          .map(line => line.replace('+++ b/', '').trim())
+      )
+    );
 
     console.log("Changed files:", changedFiles);
 
-    if (!fullDiff.trim()) {
-      console.log("No changes found in PR. Skipping AI review.");
-      process.exit(0);
-    }
-
-    if (action === 'opened') {
-      console.log("PR opened → performing full diff review.");
-      return {
-        reviewType: 'full',
-        diff: fullDiff,
-        changedFiles
-      };
-    }
-
-    if (action === 'synchronize') {
-      console.log("PR updated with new commits → performing latest commit vs previous diff.");
-      let latestCommitDiff;
-      try {
-        const latestCommit = execSync('git rev-parse HEAD').toString().trim();
-        const prevCommit = execSync('git rev-parse HEAD^').toString().trim();
-        latestCommitDiff = execSync(`git diff ${prevCommit} ${latestCommit}`, { stdio: 'pipe' }).toString();
-
-        const changedFiles = execSync(`git diff --name-only ${prevCommit} ${latestCommit}`, { encoding: 'utf-8' })
-          .split('\n')
-          .filter(Boolean);
-        console.log('Changed files:', changedFiles);
-
-        return {
-          reviewType: 'latest_commit_only',
-          diff: latestCommitDiff,
-          fullContext: execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString(),
-          changedFiles
-        };
-      } catch (err) {
-        console.warn("Failed to diff latest commit. Falling back to full diff.");
-        return {
-          reviewType: 'full',
-          diff: fullDiff,
-          changedFiles
-        };
-      }
-    }
-
-
-    console.log(`Unhandled PR action: ${action}. Skipping AI review.`);
-    process.exit(0);
+    return {
+      reviewType: 'latest_commit_only',
+      diff: latestCommitDiff,
+      fullContext: execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString(),
+      changedFiles
+    };
   } catch (e) {
     console.error("Failed to get diff from PR branch:", e.message);
     process.exit(1);

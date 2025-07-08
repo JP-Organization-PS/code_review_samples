@@ -39,6 +39,8 @@ function getGitDiff() {
       .split('\n')
       .filter(Boolean);
 
+    console.log("Changed files:", changedFiles);
+
     if (!fullDiff.trim()) {
       console.log("No changes found in PR. Skipping AI review.");
       process.exit(0);

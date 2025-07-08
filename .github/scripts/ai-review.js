@@ -29,29 +29,34 @@ function getGitDiff() {
     const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
     const action = event.action;
 
+    if (action !== 'opened') {
+      console.log(`PR action is '${action}' — skipping AI review (only run on 'opened').`);
+      process.exit(0);
+    }
+
     console.log(`Detected PR action: ${action}`);
-    console.log(`Running diff against base branch: ${base}`);
+    console.log(`Running full diff against base branch: ${base}`);
+
+    // Fetch latest base branch
     execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
 
-    const latestCommit = execSync('git rev-parse HEAD').toString().trim();
-    const prevCommit = execSync('git rev-parse HEAD^').toString().trim();
-    const latestCommitDiff = execSync(`git diff ${prevCommit} ${latestCommit}`, { stdio: 'pipe' }).toString();
+    // Full diff between base branch and HEAD
+    const fullDiff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
 
-    const changedFiles = Array.from(
-      new Set(
-        latestCommitDiff
-          .split('\n')
-          .filter(line => line.startsWith('+++ b/'))
-          .map(line => line.replace('+++ b/', '').trim())
-      )
-    );
+    const changedFiles = execSync(`git diff --name-only origin/${base}...HEAD`, { encoding: 'utf-8' })
+      .split('\n')
+      .filter(Boolean);
 
-    console.log("Updated this to check Changed files:", changedFiles);
+    if (!fullDiff.trim() || changedFiles.length === 0) {
+      console.log("No changes detected in the PR. Skipping AI review.");
+      process.exit(0);
+    }
+
+    console.log("Changed files:", changedFiles);
 
     return {
-      reviewType: 'latest_commit_only',
-      diff: latestCommitDiff,
-      fullContext: execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString(),
+      reviewType: 'pr_opened',
+      diff: fullDiff,
       changedFiles
     };
   } catch (e) {
@@ -59,6 +64,7 @@ function getGitDiff() {
     process.exit(1);
   }
 }
+
 
 function buildPrompt(diff) {
   return `You are an expert software engineer and code reviewer, specializing in clean code, security, performance, and maintainability.

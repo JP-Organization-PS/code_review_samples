@@ -51,7 +51,7 @@ def calculate(x: float, y: float, operation: str = 'subtract', round_result: boo
         print("Error during calculation:", e)
         return None
 
-def calculate_new(x: float, y: float, operation: str = 'subtract', round_result: bool = False) -> Optional[float]:
+def calculate_abc(x: float, y: float, operation: str = 'subtract', round_result: bool = False) -> Optional[float]:
     """Perform basic arithmetic operations with optional rounding."""
     try:
         result = {

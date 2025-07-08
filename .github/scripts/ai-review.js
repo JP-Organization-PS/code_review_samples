@@ -115,7 +115,7 @@ Your JSON response must follow this exact structure:
       "file": "The file name containing the issue (e.g., 'my_module.py').",
       "line": "The starting line number of the issue in the original code (NOT the diff line number).",
       "code_snippet": "This field MUST BE AN EXACT COPY of the original code snippet (from the diff) that contains the issue. DO NOT add, remove, reformat, or auto-correct code snippets."
-      "proposed_code_snippet": "The full proposed code block to fix the issue, ready for direct use. If no code change is suggested, this field should be an empty string ''. Example: def new_function():\\n    pass"
+      "proposed_code_snippet": "The full proposed code block to fix the issue, ready for direct use. If no code change is suggested, this field should be an empty string ''."
     }
   ]
 }
@@ -137,7 +137,7 @@ async function requestAzure(prompt) {
         { role: "user", content: prompt },
       ],
       temperature: 0.3,
-      max_tokens: 4096,
+      max_tokens: 8192,
     },
     { headers: { 'api-key': key, 'Content-Type': 'application/json' } }
   );

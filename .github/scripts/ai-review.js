@@ -3,7 +3,7 @@ const { execSync } = require('child_process');
 const github = require('@actions/github');
 const fs = require('fs');
 const path = require('path');
-const stringSimilarity = require('string-similarity');
+const parse = require('parse-diff');
 
 const CONFIG = {
   model: process.env.AI_MODEL || 'gemini',
@@ -21,7 +21,6 @@ const CONFIG = {
 function getGitDiff() {
   try {
     const base = process.env.GITHUB_BASE_REF;
-
     if (!base) {
       console.log("Not a pull request context. Skipping AI review.");
       process.exit(0);
@@ -56,7 +55,6 @@ function getGitDiff() {
 
     if (action === 'synchronize') {
       console.log("PR updated with new commits → performing latest commit vs main diff.");
-
       let latestCommitDiff;
       try {
         const latestCommit = execSync('git rev-parse HEAD').toString().trim();
@@ -65,7 +63,6 @@ function getGitDiff() {
         console.warn("Could not compare against base. Falling back to full diff.");
         latestCommitDiff = fullDiff;
       }
-
       return {
         reviewType: 'latest_commit_vs_main',
         diff: latestCommitDiff,
@@ -76,7 +73,6 @@ function getGitDiff() {
 
     console.log(`Unhandled PR action: ${action}. Skipping AI review.`);
     process.exit(0);
-
   } catch (e) {
     console.error("Failed to get diff from PR branch:", e.message);
     process.exit(1);
@@ -149,45 +145,30 @@ async function requestGemini(prompt) {
   return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No response from Gemini.";
 }
 
-function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
-  let lines = [];
-  try {
-    lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-  } catch {
-    try {
-      const content = execSync(`git show HEAD:${filePath}`, { encoding: 'utf-8' });
-      lines = content.split('\n');
-    } catch {
-      console.warn(`Could not read file ${filePath} from disk or git.`);
-      return null;
-    }
+function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
+  const parsedFiles = parse(diffText);
+  const targetFile = parsedFiles.find(file => file.to === filePath || file.from === filePath);
+
+  if (!targetFile) {
+    console.warn(`File '${filePath}' not found in parsed diff.`);
+    return null;
   }
 
   const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());
+  const flatChanges = targetFile.chunks.flatMap(chunk => chunk.changes)
+    .filter(change => change.add && typeof change.content === 'string');
 
-  for (let i = 0; i <= lines.length - snippetLines.length; i++) {
-    const window = lines.slice(i, i + snippetLines.length).map(l => l.trim());
-    const exactMatch = snippetLines.every((line, j) => window[j] === line);
+  for (let i = 0; i <= flatChanges.length - snippetLines.length; i++) {
+    const window = flatChanges.slice(i, i + snippetLines.length).map(c => c.content.replace(/^\+/, '').trim());
+    const exactMatch = snippetLines.every((line, j) => line === window[j]);
     if (exactMatch) {
-      console.log(`Matched using exact logic at line ${i + 1}`);
-      return { start: i + 1, end: i + snippetLines.length };
+      const startLine = flatChanges[i].ln;
+      console.log(`Matched snippet in diff for file ${filePath} at line ${startLine}`);
+      return { start: startLine, end: startLine + snippetLines.length - 1 };
     }
   }
 
-  for (let i = 0; i <= lines.length - snippetLines.length; i++) {
-    const window = lines.slice(i, i + snippetLines.length).map(l => l.trim());
-    const similarity = snippetLines.map((line, j) =>
-      stringSimilarity.compareTwoStrings(line, window[j])
-    );
-    const average = similarity.reduce((a, b) => a + b, 0) / similarity.length;
-
-    if (average >= threshold) {
-      console.log(`Matched using fuzzy logic (score: ${average.toFixed(2)}) at line ${i + 1}`);
-      return { start: i + 1, end: i + snippetLines.length };
-    }
-  }
-
-  console.warn(`No match found for the code snippet:\n${codeSnippet}`);
+  console.warn(`No match found in diff for snippet in file: ${filePath}`);
   return null;
 }
 
@@ -201,10 +182,7 @@ async function reviewCode() {
   console.log(`AI Review ouput before parsing: ${review}`);
   console.log(`\n AI Review ouput End \n`);
 
-  const cleaned = review
-    .replace(/^```json\s*/i, '')
-    .replace(/\s*```$/, '')
-    .trim();
+  const cleaned = review.replace(/```json|```/g, '').trim();
 
   let parsed;
   try {
@@ -245,19 +223,7 @@ async function reviewCode() {
         severityLabel = 'Informational';
       }
 
-      summary += `
-- <details>
-  <summary><strong>${emoji} ${issue.title}</strong> <em>(${severityLabel})</em></summary>
-
-  **📁 File:** \`${issue.file}\`  
-  **🔢 Line:** ${issue.line || 'N/A'}
-
-  **📝 Description:**  
-  ${issue.description}
-
-  **💡 Suggestion:**  
-  ${issue.suggestion}
-  </details>`;
+      summary += `\n- <details>\n  <summary><strong>${emoji} ${issue.title}</strong> <em>(${severityLabel})</em></summary>\n\n  **📁 File:** \`${issue.file}\`  \n  **🔢 Line:** ${issue.line || 'N/A'}\n\n  **📝 Description:**  \n  ${issue.description}\n\n  **💡 Suggestion:**  \n  ${issue.suggestion}\n  </details>`;
     }
     summary += `\n</details>`;
   }
@@ -273,9 +239,9 @@ async function reviewCode() {
   console.log(`Posted summary comment.`);
 
   for (const issue of filteredIssues) {
-    const result = matchSnippet(path.resolve(process.cwd(), issue.file), issue.code_snippet);
+    const result = matchSnippetFromDiff(fullContext || diff, issue.file, issue.code_snippet);
     if (!result) {
-      console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file} Snippet: ${issue.code_snippet}`);
+      console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file}`);
       continue;
     }
 

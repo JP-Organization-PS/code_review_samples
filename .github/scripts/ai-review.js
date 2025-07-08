@@ -52,7 +52,7 @@ function getGitDiff() {
       };
     }
 
-    if (action === 'synchronize_test') {
+    if (action === 'synchronize') {
       console.log("PR updated with new commits → performing latest commit vs main diff.");
 
       let latestCommitDiff;
@@ -94,7 +94,7 @@ IMPORTANT GUIDELINES:
 Your JSON response must follow this exact structure:
 {
   "overall_summary": "A brief summary of the change and your general impression.",
-  "highlights": ["Highlight any good practices or improvements made."],
+  "highlights": ["Provide detailed Highlighs about any good practices or improvements made."],
   "issues": [
     {
       "severity": "Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion.",
@@ -194,15 +194,28 @@ async function reviewCode() {
   .trim();
 
 
-  const parsed = JSON.parse(cleaned);
-  const { overall_summary, positive_aspects, issues = [] } = parsed;
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (e) {
+    console.error("Failed to parse AI response JSON:", e.message);
+    process.exit(1);
+  }
+
+  const { overall_summary, highlights = [], issues = [] } = parsed;
 
   const octokit = github.getOctokit(process.env.GITHUB_TOKEN);
   const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
-  const prNumber = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/)?.[1];
-  const commitId = github.context.payload.pull_request.head.sha;
+  const prNumber = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/)?.[1] ||
+                  github.context.payload.pull_request?.number;
+  const pr = github.context.payload.pull_request;
+  if (!pr) {
+    console.error("Not a pull_request context.");
+    process.exit(1);
+  }
+  const commitId = pr.head.sha;
 
-  let summary = `### AI Code Review Summary\n\n**📝 Overall Summary:**  \n${overall_summary}\n\n**✅ Highlights:**  \n${positive_aspects.map(p => `- ${p}`).join('\n')}`;
+  let summary = `### AI Code Review Summary\n\n**📝 Overall Summary:**  \n${overall_summary}\n\n**✅ Highlights:**  \n${highlights.map(p => `- ${p}`).join('\n')}`;
 
   if (issues.length) {
     summary += `\n\n<details>\n<summary>⚠️ <strong>Detected Issues (${issues.length})</strong> — Click to expand</summary><br>\n`;

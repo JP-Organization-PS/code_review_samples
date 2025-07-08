@@ -193,15 +193,8 @@ function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
 
 async function reviewCode() {
   const { diff, reviewType, fullContext, changedFiles } = getGitDiff(); 
-  let perFilePromptText = '';
-  for (const file of changedFiles) {
-    const fileDiff = execSync(`git diff origin/${process.env.GITHUB_BASE_REF}...HEAD -- ${file}`, { encoding: 'utf-8' });
-    if (fileDiff.trim()) {
-      perFilePromptText += `\n\n---\n# File: ${file}\n${fileDiff}`;
-    }
-  }
 
-  const prompt = buildPrompt(perFilePromptText);
+  const prompt = buildPrompt(diff);
   const review = CONFIG.model === 'azure' ? await requestAzure(prompt) : await requestGemini(prompt);
 
   console.log(`\n AI Review ouput Start \n`);

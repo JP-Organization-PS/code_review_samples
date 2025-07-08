@@ -76,7 +76,8 @@ IMPORTANT GUIDELINES:
 - When including a code_snippet, copy it exactly as shown in the diff.
 - Preserve the original indentation and formatting.
 - Do not reference files or functions that are not present in the provided diff.
-- Your response must reflect only the original code and must not attempt to fix or complete any functions.
+- You may point out logic flaws, hidden bugs, or side effects within the shown function implementation, but do not suggest fixes unless the issue appears in the provided diff.
+- You are allowed to flag runtime risks or evaluation issues even if the relevant line is not directly edited in the diff, **as long as it exists in the provided diff**.
 
 Your JSON response must follow this exact structure:
 {

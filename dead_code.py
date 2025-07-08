@@ -63,7 +63,7 @@ def read_file(filepath: str, verbose: bool = False, encoding: str = 'utf-8') -> 
         with open(filepath, 'r', encoding=encoding) as f:
             content = f.read()
             if verbose:
-                print(f"Added Reading file: {filepath}")
+                print(f"AddedReading file: {filepath}")
                 print(f"Line count: {len(content.splitlines())}")
             return content
     except (FileNotFoundError, IOError) as e:

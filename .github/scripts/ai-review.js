@@ -71,13 +71,14 @@ function buildPrompt(diff) {
 Please review the following code diff and respond in strict JSON format without making any edits to the actual code in the 'code_snippet' field.
 
 IMPORTANT GUIDELINES:
-- **Comprehensive Review**: Beyond direct changes, analyze the *entire function or block of code* visible in the diff for any potential improvements in design, robustness, readability, and adherence to best practices.
+- **Comprehensive Review**: Conduct a deep analysis of the *entire code block provided in the diff*, not just the changed lines. Actively look for design flaws, potential bugs, security vulnerabilities, performance bottlenecks, maintainability issues, and deviations from established best practices (even if they are not directly modified by the diff, as long as they are present in the provided 'code_snippet' context).
+- **Prioritization**: Prioritize identifying and detailing [CRITICAL] and [MAJOR] severity issues first. Aim to identify at least one [CRITICAL] or [MAJOR] issue if present.
 - Do not rewrite, reformat, or modify any code snippets for the 'code_snippet' field. This field MUST BE AN EXACT COPY of the original code snippet that contains the issue.
-- Do not add any new lines (e.g., inner try-except, print statements, or comments) *within the 'code_snippet' itself*.
+- When presenting a 'code_snippet' field, copy it exactly from the diff; do not add, remove, or reformat lines within the 'code_snippet' itself.
 - Preserve the original indentation and formatting in 'code_snippet'.
 - Do not reference files or functions that are not present in the provided diff.
-- You are allowed to flag runtime risks or evaluation issues even if the relevant line is not directly edited in the diff, **as long as it exists within the provided diff's context**.
-- **For 'suggestion' field**: You *can* suggest improvements, better design patterns, or more idiomatic approaches for issues identified, even if the exact fix isn't in the diff, as long as the issue is observable in the provided code_snippet or overall code block. Clearly explain the *why* behind your suggestion.
+- You are allowed to flag runtime risks or evaluation issues even if the relevant line is not directly edited in the diff, as long as it exists within the provided diff's context.
+- **For 'suggestion' field**: Recommend improvements, better design patterns, or more idiomatic approaches. You *must* provide a suggestion for every identified issue. These suggestions *can* include new lines of code or refactorings, even if the exact fix isn't in the provided 'diff', as long as the issue is observable within the 'code_snippet' you provide. Clearly explain the *why* behind your suggestion.
 
 Your JSON response must follow this exact structure:
 {

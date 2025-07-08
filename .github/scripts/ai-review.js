@@ -81,13 +81,21 @@ IMPORTANT GUIDELINES:
 Your JSON response must follow this exact structure:
 {
   "overall_summary": "A brief summary of the change and your general impression.",
-  "highlights": ["Provide detailed Highlighs about any good practices or improvements made."],
+  "highlights": [
+  "List good practices or improvements made in the diff.",
+  "Each highlight should follow this format: <Category>: <Description of change> in <function or file>.",
+  "Use concise, action-based phrases. Avoid vague or narrative descriptions.",
+  "Examples:",
+  "- Dead Code Removal: Removed unused 'calculate' function from dead_code.py.",
+  "- Logging Improvement: Added error logging in handleRequest() of apiHandler.js.",
+  "- Performance Optimization: Replaced nested loop with dictionary lookup in computeScores()."
+  ]
   "issues": [
     {
       "severity": "Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion.",
       "title": "...",
       "description": "Mention any bugs, anti-patterns, security concerns, or performance problems",
-      "suggestion": "Recommend improvements, better design patterns, or more idiomatic approaches.",
+      "suggestion": "- print(\"Added File does not exist:\", filepath)\n+ print(f\"File does not exist: {filepath}\")"
       "file": "...",
       "line": "...",
       "code_snippet": "This field MUST BE AN EXACT COPY of the original code diff. DO NOT add, remove, reformat, or auto-correct code snippets."
@@ -250,7 +258,7 @@ async function reviewCode() {
       path: issue.file,
       line: result.start,
       side: 'RIGHT',
-      body,
+      body: `#### Suggestion\n\n\`\`\`diff\n${issue.suggestion}\n\`\`\``
     });
     console.log(`Posted inline comment: ${issue.title}`);
   }

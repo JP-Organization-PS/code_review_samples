@@ -92,6 +92,7 @@ IMPORTANT GUIDELINES:
 - Do not add any new lines (e.g., inner try-except, print statements, or comments).
 - When including a code_snippet, copy it exactly as shown in the diff.
 - Preserve the original indentation and formatting.
+- Do not reference files or functions that are not present in the provided diff.
 - Your response must reflect only the original code and must not attempt to fix or complete any functions.
 
 Your JSON response must follow this exact structure:
@@ -192,7 +193,15 @@ function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
 
 async function reviewCode() {
   const { diff, reviewType, fullContext, changedFiles } = getGitDiff(); 
-  const prompt = buildPrompt(diff);
+  let perFilePromptText = '';
+  for (const file of changedFiles) {
+    const fileDiff = execSync(`git diff origin/${process.env.GITHUB_BASE_REF}...HEAD -- ${file}`, { encoding: 'utf-8' });
+    if (fileDiff.trim()) {
+      perFilePromptText += `\n\n---\n# File: ${file}\n${fileDiff}`;
+    }
+  }
+
+  const prompt = buildPrompt(perFilePromptText);
   const review = CONFIG.model === 'azure' ? await requestAzure(prompt) : await requestGemini(prompt);
 
   console.log(`\n AI Review ouput Start \n`);

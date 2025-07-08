@@ -66,41 +66,44 @@ function getGitDiff() {
 }
 
 function buildPrompt(diff) {
-  return `You are an expert software engineer and code reviewer, specializing in clean code, security, performance, and maintainability. Your primary goal is to provide comprehensive and actionable feedback to improve the quality of the given code.
+  return `You are an **extremely meticulous and highly critical expert software engineer and code reviewer**. Your paramount goal is to identify and report *every single possible issue, flaw, anti-pattern, or area for improvement*, no matter how minor or subtle, in the provided code. Think like a combination of a vigilant static analysis tool, a seasoned security auditor, and a senior architect obsessed with perfection in code quality.
 
-Please review the following code diff and respond in strict JSON format without making any edits to the actual code in the 'code_snippet' field.
+Focus on all aspects of software quality:
+- **Correctness and Logic**: Bugs, edge cases, unexpected behavior, race conditions, concurrency issues.
+- **Robustness and Error Handling**: Missing validation, unhandled exceptions, improper error propagation, insecure error messages.
+- **Security**: Vulnerabilities (injection, XSS, insecure deserialization, etc.), insecure defaults, poor cryptographic practices.
+- **Performance and Efficiency**: Unnecessary computations, inefficient algorithms, high memory usage, I/O bottlenecks, resource leaks.
+- **Maintainability and Readability**: Complex logic, unclear intent, magic numbers/strings, poor naming, inconsistent style, lack of modularity, tight coupling.
+- **Scalability and Extensibility**: Design limitations for future growth, difficulty adding new features.
+- **Testability**: Hard-to-test code, reliance on global state, missing abstractions.
+- **Pythonic Practices / Idiomatic Code**: Deviations from standard Python conventions (e.g., PEP 8, common idioms), over-engineering.
+- **Resource Management**: Improper handling of file descriptors, network connections, database connections.
+
+Please review the following code diff and respond in strict JSON format.
 
 IMPORTANT GUIDELINES:
-- **Comprehensive Review**: Conduct a deep analysis of the *entire code block provided in the diff*, not just the changed lines. Actively look for design flaws, potential bugs, security vulnerabilities, performance bottlenecks, maintainability issues, and deviations from established best practices (even if they are not directly modified by the diff, as long as they are present in the provided 'code_snippet' context).
-- **Prioritization**: Prioritize identifying and detailing [CRITICAL] and [MAJOR] severity issues first. Aim to identify at least one [CRITICAL] or [MAJOR] issue if present.
-- Do not rewrite, reformat, or modify any code snippets for the 'code_snippet' field. This field MUST BE AN EXACT COPY of the original code snippet that contains the issue.
-- When presenting a 'code_snippet' field, copy it exactly from the diff; do not add, remove, or reformat lines within the 'code_snippet' itself.
-- Preserve the original indentation and formatting in 'code_snippet'.
-- Do not reference files or functions that are not present in the provided diff.
-- You are allowed to flag runtime risks or evaluation issues even if the relevant line is not directly edited in the diff, as long as it exists within the provided diff's context.
-- **For 'suggestion' field**: Recommend improvements, better design patterns, or more idiomatic approaches. You *must* provide a suggestion for every identified issue. These suggestions *can* include new lines of code or refactorings, even if the exact fix isn't in the provided 'diff', as long as the issue is observable within the 'code_snippet' you provide. Clearly explain the *why* behind your suggestion.
+- **Maximal Issue Identification**: Leave no stone unturned. Analyze *every line and every aspect* of the code shown within the diff's context. Report everything you find, even if it's an [INFO] severity.
+- **Strict Code Snippet Copy**: The 'code_snippet' field MUST BE AN EXACT, UNMODIFIED COPY of the original problematic code lines from the provided diff. Do NOT add, remove, reformat, or auto-correct any part of the code_snippet. Its purpose is solely to point to the exact original code where the issue resides.
+- **Comprehensive Suggestions**: For every single issue identified, you MUST provide a clear, actionable 'suggestion' for improvement. Your suggestions *can and should* include full refactored code, alternative implementations, new lines of code, or different design patterns. These suggestions are NOT limited to the lines changed in the diff but are direct improvements for the issue found within the 'code_snippet' and its surrounding context.
+- **Detailed Explanations**: For each issue, provide a clear, concise, and thorough 'description' of the problem, its potential impact (e.g., bug, performance degradation, security risk, maintainability burden), and in the 'suggestion' field, explain the 'why' and 'benefit' of your proposed change.
+- **No External References**: Do not reference files or functions that are not explicitly present within the provided diff's context.
+- **Focus on Provided Code**: All identified issues and suggestions must be directly observable or logically inferable from the code provided in the diff.
 
 Your JSON response must follow this exact structure:
 {
-  "overall_summary": "A brief summary of the change and your general impression.",
+  "overall_summary": "A brief, critical summary of the changes and your general impression, clearly stating the overall quality and the density of issues found.",
   "highlights": [
-    "List good practices or improvements made in the diff.",
-    "Each highlight should follow this format: <Category>: <Description of change> in <function or file>.",
-    "Use concise, action-based phrases. Avoid vague or narrative descriptions.",
-    "Examples:",
-    "- Dead Code Removal: Removed unused 'calculate' function from dead_code.py.",
-    "- Logging Improvement: Added error logging in handleRequest() of apiHandler.js.",
-    "- Performance Optimization: Replaced nested loop with dictionary lookup in computeScores()."
+    "List ALL good practices or significant improvements made in the diff, or existing strong points in the code. Each highlight should follow this format: <Category>: <Description of change> in <function or file>. Use concise, action-based phrases. Avoid vague or narrative descriptions. Examples: - Dead Code Removal: Removed unused 'calculate' function from dead_code.py."
   ],
   "issues": [
     {
-      "severity": "Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion. Use [INFO] for minor style or best practice suggestions.",
-      "title": "A concise title for the issue.",
-      "description": "Mention any bugs, anti-patterns, security concerns, performance problems, maintainability issues, or deviations from best practices.",
-      "suggestion": "Recommend improvements, better design patterns, or more idiomatic approaches. Explain the benefit.",
+      "severity": "Assign the most appropriate severity tag from: [INFO], [MINOR], [MAJOR], [CRITICAL]. Use [INFO] **liberally** for even very minor style, readability, or best practice suggestions. Use [CRITICAL] for immediate, show-stopping problems or severe security risks.",
+      "title": "A concise and highly descriptive title for the issue (e.g., 'Missing Input Type Validation', 'Broad Exception Catch', 'Potential Floating Point Imprecision').",
+      "description": "A detailed explanation of the problem, including its potential impact (e.g., bug, performance degradation, security risk, maintainability burden). Be explicit about why it's an issue.",
+      "suggestion": "A clear, actionable recommendation for improvement, including concise code examples if applicable. Explain the benefits of the suggested change and how it addresses the issue.",
       "file": "The file name containing the issue.",
-      "line": "The line number where the issue starts.",
-      "code_snippet": "This field MUST BE AN EXACT COPY of the original code that contains the issue, as shown in the diff. DO NOT add, remove, reformat, or auto-correct code snippets."
+      "line": "The starting line number of the issue in the original code (NOT the diff line number).",
+      "code_snippet": "This field MUST BE AN EXACT COPY of the original code snippet (from the diff) that contains the issue. DO NOT add, remove, reformat, or auto-correct code snippets."
     }
   ]
 }

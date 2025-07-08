@@ -1,4 +1,3 @@
-// ai-review.js
 const axios = require('axios');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
@@ -36,8 +35,10 @@ function getGitDiff() {
 
     execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
 
-    // Full PR diff
     const fullDiff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
+    const changedFiles = execSync(`git diff --name-only origin/${base}...HEAD`, { encoding: 'utf-8' })
+      .split('\n')
+      .filter(Boolean);
 
     if (!fullDiff.trim()) {
       console.log("No changes found in PR. Skipping AI review.");
@@ -48,7 +49,8 @@ function getGitDiff() {
       console.log("PR opened → performing full diff review.");
       return {
         reviewType: 'full',
-        diff: fullDiff
+        diff: fullDiff,
+        changedFiles
       };
     }
 
@@ -67,7 +69,8 @@ function getGitDiff() {
       return {
         reviewType: 'latest_commit_vs_main',
         diff: latestCommitDiff,
-        fullContext: fullDiff
+        fullContext: fullDiff,
+        changedFiles
       };
     }
 
@@ -146,12 +149,21 @@ async function requestGemini(prompt) {
 }
 
 function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
-  if (!fs.existsSync(filePath)) return null;
+  let lines = [];
+  try {
+    lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+  } catch {
+    try {
+      const content = execSync(`git show HEAD:${filePath}`, { encoding: 'utf-8' });
+      lines = content.split('\n');
+    } catch {
+      console.warn(`Could not read file ${filePath} from disk or git.`);
+      return null;
+    }
+  }
 
-  const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
   const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());
 
-  // First: Try exact match
   for (let i = 0; i <= lines.length - snippetLines.length; i++) {
     const window = lines.slice(i, i + snippetLines.length).map(l => l.trim());
     const exactMatch = snippetLines.every((line, j) => window[j] === line);
@@ -161,7 +173,6 @@ function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
     }
   }
 
-  // Fallback: Try fuzzy matching
   for (let i = 0; i <= lines.length - snippetLines.length; i++) {
     const window = lines.slice(i, i + snippetLines.length).map(l => l.trim());
     const similarity = snippetLines.map((line, j) =>
@@ -180,7 +191,7 @@ function matchSnippet(filePath, codeSnippet, threshold = 0.85) {
 }
 
 async function reviewCode() {
-  const { diff, reviewType, fullContext } = getGitDiff(); 
+  const { diff, reviewType, fullContext, changedFiles } = getGitDiff(); 
   const prompt = buildPrompt(diff);
   const review = CONFIG.model === 'azure' ? await requestAzure(prompt) : await requestGemini(prompt);
 
@@ -189,10 +200,9 @@ async function reviewCode() {
   console.log(`\n AI Review ouput End \n`);
 
   const cleaned = review
-  .replace(/^```json\s*/i, '')         // remove opening ```json and optional whitespace
-  .replace(/\s*```$/, '')              // remove closing ``` at the end
-  .trim();
-
+    .replace(/^```json\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
 
   let parsed;
   try {
@@ -203,40 +213,37 @@ async function reviewCode() {
   }
 
   const { overall_summary, highlights = [], issues = [] } = parsed;
+  const filteredIssues = issues.filter(issue => changedFiles.includes(issue.file));
 
   const octokit = github.getOctokit(process.env.GITHUB_TOKEN);
   const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
   const prNumber = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/)?.[1] ||
-                  github.context.payload.pull_request?.number;
-  const pr = github.context.payload.pull_request;
-  if (!pr) {
-    console.error("Not a pull_request context.");
-    process.exit(1);
-  }
-  const commitId = pr.head.sha;
+                   github.context.payload.pull_request?.number;
+  const commitId = github.context.payload.pull_request?.head?.sha;
 
   let summary = `### AI Code Review Summary\n\n**📝 Overall Summary:**  \n${overall_summary}\n\n**✅ Highlights:**  \n${highlights.map(p => `- ${p}`).join('\n')}`;
 
-  if (issues.length) {
-    summary += `\n\n<details>\n<summary>⚠️ <strong>Detected Issues (${issues.length})</strong> — Click to expand</summary><br>\n`;
-  for (const issue of issues) {
-    let emoji = '🟢';
-    let severityLabel = 'Low Priority';
+  if (filteredIssues.length) {
+    summary += `\n\n<details>\n<summary>⚠️ <strong>Detected Issues (${filteredIssues.length})</strong> — Click to expand</summary><br>\n`;
+    for (const issue of filteredIssues) {
+      let emoji = '🟢';
+      let severityLabel = 'Low Priority';
 
-    if (issue.severity === 'CRITICAL') {
-      emoji = '🔴';
-      severityLabel = 'Critical Priority';
-    } else if (issue.severity === 'MAJOR') {
-      emoji = '🔴';
-      severityLabel = 'High Priority';
-    } else if (issue.severity === 'MINOR') {
-      emoji = '🟠';
-      severityLabel = 'Medium Priority';
-    } else if (issue.severity === 'INFO') {
-      emoji = '🔵';
-      severityLabel = 'Informational';
-    }
-    summary += `
+      if (issue.severity === 'CRITICAL') {
+        emoji = '🔴';
+        severityLabel = 'Critical Priority';
+      } else if (issue.severity === 'MAJOR') {
+        emoji = '🔴';
+        severityLabel = 'High Priority';
+      } else if (issue.severity === 'MINOR') {
+        emoji = '🟠';
+        severityLabel = 'Medium Priority';
+      } else if (issue.severity === 'INFO') {
+        emoji = '🔵';
+        severityLabel = 'Informational';
+      }
+
+      summary += `
 - <details>
   <summary><strong>${emoji} ${issue.title}</strong> <em>(${severityLabel})</em></summary>
 
@@ -263,7 +270,7 @@ async function reviewCode() {
   });
   console.log(`Posted summary comment.`);
 
-  for (const issue of issues) {
+  for (const issue of filteredIssues) {
     const result = matchSnippet(path.resolve(process.cwd(), issue.file), issue.code_snippet);
     if (!result) {
       console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file} Snippet: ${issue.code_snippet}`);

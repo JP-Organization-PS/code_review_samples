@@ -65,19 +65,19 @@ function getGitDiff() {
   }
 }
 
-
 function buildPrompt(diff) {
-  return `You are an expert software engineer and code reviewer, specializing in clean code, security, performance, and maintainability.
+  return `You are an expert software engineer and code reviewer, specializing in clean code, security, performance, and maintainability. Your primary goal is to provide comprehensive and actionable feedback to improve the quality of the given code.
 
-Please review the following code diff and respond in strict JSON format without making any edits to the actual code.
+Please review the following code diff and respond in strict JSON format without making any edits to the actual code in the 'code_snippet' field.
+
 IMPORTANT GUIDELINES:
-- Do not rewrite, reformat, or modify any code snippets.
-- Do not add any new lines (e.g., inner try-except, print statements, or comments).
-- When including a code_snippet, copy it exactly as shown in the diff.
-- Preserve the original indentation and formatting.
+- **Comprehensive Review**: Beyond direct changes, analyze the *entire function or block of code* visible in the diff for any potential improvements in design, robustness, readability, and adherence to best practices.
+- Do not rewrite, reformat, or modify any code snippets for the 'code_snippet' field. This field MUST BE AN EXACT COPY of the original code snippet that contains the issue.
+- Do not add any new lines (e.g., inner try-except, print statements, or comments) *within the 'code_snippet' itself*.
+- Preserve the original indentation and formatting in 'code_snippet'.
 - Do not reference files or functions that are not present in the provided diff.
-- You may point out logic flaws, hidden bugs, or side effects within the shown function implementation, but do not suggest fixes unless the issue appears in the provided diff.
-- You are allowed to flag runtime risks or evaluation issues even if the relevant line is not directly edited in the diff, **as long as it exists in the provided diff**.
+- You are allowed to flag runtime risks or evaluation issues even if the relevant line is not directly edited in the diff, **as long as it exists within the provided diff's context**.
+- **For 'suggestion' field**: You *can* suggest improvements, better design patterns, or more idiomatic approaches for issues identified, even if the exact fix isn't in the diff, as long as the issue is observable in the provided code_snippet or overall code block. Clearly explain the *why* behind your suggestion.
 
 Your JSON response must follow this exact structure:
 {
@@ -90,20 +90,20 @@ Your JSON response must follow this exact structure:
     "- Dead Code Removal: Removed unused 'calculate' function from dead_code.py.",
     "- Logging Improvement: Added error logging in handleRequest() of apiHandler.js.",
     "- Performance Optimization: Replaced nested loop with dictionary lookup in computeScores()."
-  ]
+  ],
   "issues": [
     {
-      "severity": "Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion.",
-      "title": "...",
-      "description": "Mention any bugs, anti-patterns, security concerns, or performance problems",
-      "suggestion": "Recommend improvements, better design patterns, or more idiomatic approaches.",
-      "file": "...",
-      "line": "...",
-      "code_snippet": "This field MUST BE AN EXACT COPY of the original code diff. DO NOT add, remove, reformat, or auto-correct code snippets."
+      "severity": "Use tags like [INFO], [MINOR], [MAJOR], [CRITICAL] before each issue/suggestion. Use [INFO] for minor style or best practice suggestions.",
+      "title": "A concise title for the issue.",
+      "description": "Mention any bugs, anti-patterns, security concerns, performance problems, maintainability issues, or deviations from best practices.",
+      "suggestion": "Recommend improvements, better design patterns, or more idiomatic approaches. Explain the benefit.",
+      "file": "The file name containing the issue.",
+      "line": "The line number where the issue starts.",
+      "code_snippet": "This field MUST BE AN EXACT COPY of the original code that contains the issue, as shown in the diff. DO NOT add, remove, reformat, or auto-correct code snippets."
     }
   ]
 }
-Respond with a single valid JSON object only. Do not include Markdown, code blocks, backticks, or any additional formatting.
+Respond with a single valid JSON object only. Do not include Markdown, code blocks, backticks, or any additional formatting outside of the JSON object itself.
 
 Here is the code diff:
 

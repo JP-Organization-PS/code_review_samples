@@ -70,6 +70,21 @@ def read_file(filepath: str, verbose: bool = False, encoding: str = 'utf-8') -> 
         print("Error reading file:", filepath, "-", str(e))
         return None
 
+def new_read_file(filepath: str, verbose: bool = False, encoding: str = 'utf-8') -> Optional[str]:
+    """Read file contents with optional verbosity."""
+    if not os.path.exists(filepath):
+        print("File does not exist:", filepath)
+        return None
+    try:
+        with open(filepath, 'r', encoding=encoding) as f:
+            content = f.read()
+            if verbose:
+                print(f"Reading file: {filepath}")
+                print(f"Line count: {len(content.splitlines())}")
+            return content
+    except (FileNotFoundError, IOError) as e:
+        print("Error reading file:", filepath, "-", str(e))
+        return None
 
 def write_file(filepath: str, content: str, encoding: str = 'utf-8') -> bool:
     """Write content to a file."""

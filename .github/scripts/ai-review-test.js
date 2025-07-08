@@ -21,7 +21,6 @@ const CONFIG = {
 function getGitDiff() {
   try {
     const base = process.env.GITHUB_BASE_REF;
-
     if (!base) {
       console.log("Not a pull request context. Skipping AI review.");
       process.exit(0);
@@ -36,52 +35,64 @@ function getGitDiff() {
     execSync(`git fetch origin ${base}`, { stdio: 'inherit' });
 
     const fullDiff = execSync(`git diff origin/${base}...HEAD`, { stdio: 'pipe' }).toString();
-    const changedFiles = execSync(`git diff --name-only origin/${base}...HEAD`, { encoding: 'utf-8' })
+    const allChangedFiles = execSync(`git diff --name-only origin/${base}...HEAD`, { encoding: 'utf-8' })
       .split('\n')
       .filter(Boolean);
 
-    if (!fullDiff.trim()) {
-      console.log("No changes found in PR. Skipping AI review.");
-      process.exit(0);
-    }
-
     if (action === 'opened') {
       console.log("PR opened → performing full diff review.");
+      console.log("Changed files:", allChangedFiles);
       return {
         reviewType: 'full',
         diff: fullDiff,
-        changedFiles
+        changedFiles: allChangedFiles
       };
     }
 
     if (action === 'synchronize') {
-      console.log("PR updated with new commits → performing latest commit vs main diff.");
+      console.log("PR updated with new commits → checking only latest commit.");
 
-      let latestCommitDiff;
       try {
         const latestCommit = execSync('git rev-parse HEAD').toString().trim();
-        latestCommitDiff = execSync(`git diff origin/${base} ${latestCommit}`, { stdio: 'pipe' }).toString();
-      } catch (err) {
-        console.warn("Could not compare against base. Falling back to full diff.");
-        latestCommitDiff = fullDiff;
-      }
+        const prevCommit = execSync('git rev-parse HEAD^').toString().trim();
 
-      return {
-        reviewType: 'latest_commit_vs_main',
-        diff: latestCommitDiff,
-        fullContext: fullDiff,
-        changedFiles
-      };
+        const latestCommitDiff = execSync(`git diff ${prevCommit} ${latestCommit}`, { stdio: 'pipe' }).toString();
+        const latestChangedFiles = execSync(`git diff --name-only ${prevCommit} ${latestCommit}`, { encoding: 'utf-8' })
+          .split('\n')
+          .filter(Boolean);
+
+        console.log('Changed files in latest commit:', latestChangedFiles);
+
+        if (!latestCommitDiff.trim() || latestChangedFiles.length === 0) {
+          console.log('No file changes in the latest commit. Skipping AI review.');
+          process.exit(0);
+        }
+
+        return {
+          reviewType: 'latest_commit_only',
+          diff: latestCommitDiff,
+          fullContext: fullDiff,
+          changedFiles: latestChangedFiles
+        };
+      } catch (err) {
+        console.warn('Error comparing latest commit. Falling back to full diff.');
+        console.log("Changed files:", allChangedFiles);
+        return {
+          reviewType: 'full',
+          diff: fullDiff,
+          changedFiles: allChangedFiles
+        };
+      }
     }
 
     console.log(`Unhandled PR action: ${action}. Skipping AI review.`);
     process.exit(0);
-
   } catch (e) {
     console.error("Failed to get diff from PR branch:", e.message);
     process.exit(1);
   }
 }
+
 
 function buildPrompt(diff) {
   return `You are an expert software engineer and code reviewer, specializing in clean code, security, performance, and maintainability.

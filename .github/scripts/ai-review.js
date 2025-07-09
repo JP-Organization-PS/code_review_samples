@@ -264,13 +264,8 @@ async function reviewCode() {
         : issue.severity === 'INFO'
           ? '🔵 Informational'
           : '🟢 Low Priority';
-    const body = `#### ${priority}
+    const body = `#### ${priority}\n\n**Issue: ${issue.title}**  \n${issue.description}  \n\n**Suggestion:**  \n${issue.suggestion} \n\n
 
-    **Issue:** ${issue.title}  
-    ${issue.description}
-
-    **Suggestion:**  
-    ${issue.suggestion}
     ${issue.proposed_code_snippet ? `\n\`\`\`js\n${issue.proposed_code_snippet}\n\`\`\`` : ''}`;
 
 

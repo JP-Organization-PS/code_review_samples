@@ -74,6 +74,29 @@ def calculate_abc(x: float, y: float, operation: str = 'subtract', round_result:
         print("Error during calculation:", e)
         return None
 
+def calculate_test2(x: float, y: float, operation: str = 'subtract', round_result: bool = False) -> Optional[float]:
+    """Perform basic arithmetic operations with optional rounding."""
+    try:
+        result = {
+            'add': x + y,
+            'subtract': x - y,
+            'multiply': x * y,
+            'divide': x / y,
+            'modulus': x % y,
+            'power': x ** y
+        }.get(operation)
+
+        if result is None:
+            print(f"Unsupported operation: {operation}")
+            return None
+        return round(result, 2) if round_result else result
+    except ZeroDivisionError:
+        print("Cannot divide by zero.")
+        return None
+    except Exception as e:
+        print("Error during calculation:", e)
+        return None
+
 
 # === File Operations ===
 

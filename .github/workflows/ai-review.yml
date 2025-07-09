@@ -29,7 +29,7 @@ jobs:
       - name: Run AI Code Review
         run: node .github/scripts/ai-review.js
         env:
-          AI_MODEL: gemini  # or 'azure'
+          AI_MODEL: azure  # or 'azure'
           AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}

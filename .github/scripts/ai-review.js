@@ -130,7 +130,7 @@ async function requestAzure(prompt) {
   console.log("Using Azure OpenAI...");
   const { endpoint, deployment, key } = CONFIG.azure;
   const res = await axios.post(
-    `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=2024-03-01-preview`,
+    `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=2025-01-01-preview`,
     {
       messages: [
         { role: "system", content: "You are a professional code reviewer." },

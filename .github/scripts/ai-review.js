@@ -264,7 +264,6 @@ async function reviewCode() {
         : issue.severity === 'INFO'
           ? '🔵 Informational'
           : '🟢 Low Priority';
-
     const body = `#### ${priority}
 
     **Issue:** ${issue.title}  
@@ -272,10 +271,8 @@ async function reviewCode() {
 
     **Suggestion:**  
     ${issue.suggestion}
+    ${issue.proposed_code_snippet ? `\n\`\`\`js\n${issue.proposed_code_snippet}\n\`\`\`` : ''}`;
 
-    \`\`\`js
-    ${issue.proposed_code_snippet || '// No code change suggested.'}
-    \`\`\``;
 
     await octokit.rest.pulls.createReviewComment({
       owner,

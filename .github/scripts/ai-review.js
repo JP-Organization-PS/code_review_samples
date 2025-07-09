@@ -115,7 +115,7 @@ Your JSON response must follow this exact structure:
       "file": "The file name containing the issue (e.g., 'my_module.py').",
       "line": "The starting line number of the issue in the original code (NOT the diff line number).",
       "code_snippet": "This field MUST BE AN EXACT COPY of the original code snippet (from the diff) that contains the issue. DO NOT add, remove, reformat, or auto-correct code snippets."
-      "proposed_code_snippet": "The full proposed code block to fix the issue, ready for direct use. If no code change is suggested, this field should be an empty string ''. Example: def new_function():\\n    pass"
+      "proposed_code_snippet": "The full proposed code block to fix the issue, ready for direct use. If no code change is suggested, this field should be an empty string ''."
     }
   ]
 }
@@ -130,14 +130,14 @@ async function requestAzure(prompt) {
   console.log("Using Azure OpenAI...");
   const { endpoint, deployment, key } = CONFIG.azure;
   const res = await axios.post(
-    `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=2024-03-01-preview`,
+    `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=2025-01-01-preview`,
     {
       messages: [
         { role: "system", content: "You are a professional code reviewer." },
         { role: "user", content: prompt },
       ],
       temperature: 0.3,
-      max_tokens: 4096,
+      max_tokens: 8192,
     },
     { headers: { 'api-key': key, 'Content-Type': 'application/json' } }
   );
@@ -194,11 +194,7 @@ async function reviewCode() {
   console.log(`AI Review ouput before parsing: ${review}`);
   console.log(`\n AI Review ouput End \n`);
 
-  const cleaned = review
-  .replace(/```json/, '')           // remove starting block
-  .replace(/```$/, '')              // remove ending block if at very end
-  .replace(/\n```[\s\S]*$/, '')     // strip trailing triple backtick and anything after
-  .trim();
+  const cleaned = review.replace(/```json|```/g, '').trim();
 
   let parsed;
   try {
@@ -268,18 +264,10 @@ async function reviewCode() {
         : issue.severity === 'INFO'
           ? '🔵 Informational'
           : '🟢 Low Priority';
+    const body = `#### ${priority}\n\n**Issue: ${issue.title}**  \n${issue.description}  \n\n**Suggestion:**  \n${issue.suggestion} \n\n
 
-    const body = `#### ${priority}
+    ${issue.proposed_code_snippet ? `\n\`\`\`js\n${issue.proposed_code_snippet}\n\`\`\`` : ''}`;
 
-    **Issue:** ${issue.title}  
-    ${issue.description}
-
-    **Suggestion:**  
-    ${issue.suggestion}
-
-    \`\`\`js
-    ${issue.proposed_code_snippet || '// No code change suggested.'}
-    \`\`\``;
 
     await octokit.rest.pulls.createReviewComment({
       owner,

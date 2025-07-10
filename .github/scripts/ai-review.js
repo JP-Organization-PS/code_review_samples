@@ -137,7 +137,7 @@ async function requestAzure(prompt) {
         { role: "user", content: prompt },
       ],
       temperature: 0.3,
-      max_tokens: 8192,
+      max_tokens: 16384,
     },
     { headers: { 'api-key': key, 'Content-Type': 'application/json' } }
   );
@@ -150,7 +150,7 @@ async function requestGemini(prompt) {
     CONFIG.gemini.endpoint,
     {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: 8192 },
+      generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: 16384 },
     },
     { headers: { 'Content-Type': 'application/json' } }
   );

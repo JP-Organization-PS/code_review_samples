@@ -14,7 +14,7 @@ const CONFIG = {
   },
   gemini: {
     key: process.env.GEMINI_API_KEY,
-    endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-latest:generateContent?key=${process.env.GEMINI_API_KEY}`,
   },
 };
 

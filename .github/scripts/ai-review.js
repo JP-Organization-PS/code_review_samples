@@ -130,29 +130,36 @@ function splitDiffByFileChunks(diffText) {
  * @returns {{start: number, end: number}|null} - The starting and ending line numbers, or null if not found.
  */
 function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
-  const parsedFiles = parse(diffText);
+  const parsedFiles = parseDiff(diffText);
   const targetFile = parsedFiles.find(file => file.to === filePath || file.from === filePath);
 
   if (!targetFile) {
-    console.warn(`File '${filePath}' not found in parsed diff.`);
+    console.warn(`File '${filePath}' not found for snippet matching.`);
     return null;
   }
 
-  const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());
-  const flatChanges = targetFile.chunks.flatMap(chunk => chunk.changes)
-    .filter(change => change.add && typeof change.content === 'string');
+  const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim().replace(/^[\s+]/, ''));
+  if (snippetLines.length === 0) return null;
 
-  for (let i = 0; i <= flatChanges.length - snippetLines.length; i++) {
-    const window = flatChanges.slice(i, i + snippetLines.length).map(c => c.content.replace(/^\+/, '').trim());
-    const exactMatch = snippetLines.every((line, j) => line === window[j]);
-    if (exactMatch) {
-      const startLine = flatChanges[i].ln;
-      console.log(`Matched snippet in diff for file ${filePath} at line ${startLine}`);
-      return { start: startLine, end: startLine + snippetLines.length - 1 };
+  for (const chunk of targetFile.chunks) {
+    for (let i = 0; i <= chunk.changes.length - snippetLines.length; i++) {
+      const window = chunk.changes.slice(i, i + snippetLines.length);
+      const windowLines = window.map(c => c.content.trim().replace(/^[\s+]/, ''));
+      const isMatch = snippetLines.every((line, j) => line === windowLines[j]);
+
+      if (isMatch) {
+        const firstAddedChange = window.find(c => c.add);
+        if (firstAddedChange) {
+          const startLine = firstAddedChange.ln;
+          const endLine = window[window.length - 1].ln || startLine;
+          console.log(`✅ Matched snippet in diff for file ${filePath} at line ${startLine}`);
+          return { start: startLine, end: endLine };
+        }
+      }
     }
   }
 
-  console.warn(`No match found in diff for snippet in file: ${filePath}`);
+  console.warn(`❌ No exact match found in diff for snippet in file: ${filePath}`);
   return null;
 }
 
@@ -233,8 +240,10 @@ ${diff}`;
  * @returns {Promise<object>} - The parsed JSON response from the AI.
  * @throws {Error} If the API call fails after all retries.
  */
-async function callAIModel(modelName, prompt) {
+
+async function callAIModel(modelName, prompt, promptTokens) {
   console.log(`Using ${modelName.toUpperCase()} model...`);
+  const availableOutputTokens = Math.max(1024, TOKEN_LIMIT - promptTokens - 500); // Safety buffer
   let lastError = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -245,12 +254,9 @@ async function callAIModel(modelName, prompt) {
         res = await axios.post(
           `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${API_VERSION_AZURE}`,
           {
-            messages: [
-              { role: "system", content: "You are a professional code reviewer." },
-              { role: "user", content: prompt },
-            ],
+            messages: [{ role: "system", content: "You are a professional code reviewer." }, { role: "user", content: prompt }],
             temperature: 0.3,
-            max_tokens: TOKEN_LIMIT,
+            max_tokens: availableOutputTokens,
           },
           { headers: { 'api-key': key, 'Content-Type': 'application/json' } }
         );
@@ -261,7 +267,7 @@ async function callAIModel(modelName, prompt) {
           endpoint,
           {
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: TOKEN_LIMIT },
+            generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: availableOutputTokens },
           },
           { headers: { 'Content-Type': 'application/json' } }
         );
@@ -272,25 +278,19 @@ async function callAIModel(modelName, prompt) {
     } catch (error) {
       lastError = error;
       console.error(`Attempt ${attempt} failed for ${modelName} model:`, error.message);
-
-      // Don't retry on client errors (e.g., 400 Bad Request), as they are unlikely to succeed.
       if (error.response && error.response.status >= 400 && error.response.status < 500) {
         console.error(`Client error (${error.response.status}), not retrying.`);
-        break; // Exit the loop immediately.
+        break;
       }
-
       if (attempt < MAX_RETRIES) {
-        // Use exponential backoff for the delay
         const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1);
         console.log(`Retrying in ${delay / 1000} seconds...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
   }
-
-  // If all retries failed, throw an error with details.
-  console.error(`All ${MAX_RETRIES} retries failed for ${modelName} model.`);
-  if (lastError.response) {
+  console.error(`All ${MAX_RETRIES} retries failed for ${modelName} AI model.`);
+  if (lastError?.response) {
     console.error(`Final Status: ${lastError.response.status}`);
     console.error(`Final Data: ${JSON.stringify(lastError.response.data)}`);
   }

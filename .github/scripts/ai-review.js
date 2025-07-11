@@ -86,12 +86,12 @@ function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
         if (normalizedSnippetLines[j] !== normalizedWindowLines[j]) {
           allLinesMatch = false;
           // *** EXACT MATCH DEBUGGING LOGIC ***
-          console.log('\n--- EXACT MATCH FAILED ---');
-          console.log(`FILE: ${filePath}`);
-          console.log(`DETAILS: Line ${j + 1} of the snippet did not match.`);
-          console.log('AI SNIPPET (Normalized):  ', JSON.stringify(normalizedSnippetLines[j]));
-          console.log('GIT DIFF   (Normalized):', JSON.stringify(normalizedWindowLines[j]));
-          console.log('--- END MISMATCH ---\n');
+          // console.log('\n--- EXACT MATCH FAILED ---');
+          // console.log(`FILE: ${filePath}`);
+          // console.log(`DETAILS: Line ${j + 1} of the snippet did not match.`);
+          // console.log('AI SNIPPET (Normalized):  ', JSON.stringify(normalizedSnippetLines[j]));
+          // console.log('GIT DIFF   (Normalized):', JSON.stringify(normalizedWindowLines[j]));
+          // console.log('--- END MISMATCH ---\n');
           break; // Stop checking this window
         }
       }

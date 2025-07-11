@@ -5,7 +5,7 @@ const fs = require('fs');
 const parseDiff = require('parse-diff'); // Renamed to avoid conflict with `parse`
 
 // --- Constants ---
-const TOKEN_LIMIT = 8192;
+const TOKEN_LIMIT = 16384;
 const MAX_LINES_PER_CHUNK = 150;
 const API_VERSION_AZURE = '2025-01-01-preview';
 const MAX_RETRIES = 3; // Maximum number of retry attempts

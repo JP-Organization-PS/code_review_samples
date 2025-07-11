@@ -28,7 +28,7 @@ def process(data: Union[str, int, float], mode: str = 'default') -> Optional[str
         return None
 
 
-def calculate(x: float, y: float, operation: str = 'subtract', round_result: bool = False) -> Optional[float]:
+def calculate123(x: float, y: float, operation: str = 'subtract', round_result: bool = False) -> Optional[float]:
     """Perform basic arithmetic operations with optional rounding."""
     try:
         result = {

@@ -41,6 +41,19 @@ function estimateTokens(text) {
 }
 
 /**
+ * Normalizes a line of code for reliable comparison by removing prefixes,
+ * trimming whitespace, and collapsing internal spaces.
+ * @param {string} line - The line of code.
+ * @returns {string} - The normalized line.
+ */
+function normalizeLine(line) {
+  return line
+    .trim()
+    .replace(/^[\s+-]/, '') // Removes diff prefixes like '+', '-', or leading space
+    .replace(/\s+/g, ' ');   // Collapses multiple whitespace chars into a single space
+}
+
+/**
  * Parses a diff string into an array of file objects.
  * @param {string} diffText - The raw diff string.
  * @returns {Array} - Array of parsed file objects.
@@ -123,11 +136,11 @@ function splitDiffByFileChunks(diffText) {
 }
 
 /**
- * Determines the line number of a code snippet within a given diff.
+ * Determines the line number of a code snippet using a robust, normalized comparison.
  * @param {string} diffText - The full diff text.
  * @param {string} filePath - The path of the file where the snippet is located.
- * @param {string} codeSnippet - The exact code snippet to match.
- * @returns {{start: number, end: number}|null} - The starting and ending line numbers, or null if not found.
+ * @param {string} codeSnippet - The code snippet from the AI.
+ * @returns {{start: number, end: number}|null}
  */
 function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
   const parsedFiles = parseDiff(diffText);
@@ -138,16 +151,24 @@ function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
     return null;
   }
 
-  const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim().replace(/^[\s+]/, ''));
-  if (snippetLines.length === 0) return null;
+  // Normalize every line of the AI's snippet
+  const snippetLines = codeSnippet.trim().split('\n').map(normalizeLine);
+  if (snippetLines.length === 0 || snippetLines.every(l => l === '')) {
+    return null; // Ignore empty snippets
+  }
 
   for (const chunk of targetFile.chunks) {
+    // Slide a "window" of lines across the diff's changes
     for (let i = 0; i <= chunk.changes.length - snippetLines.length; i++) {
       const window = chunk.changes.slice(i, i + snippetLines.length);
-      const windowLines = window.map(c => c.content.trim().replace(/^[\s+]/, ''));
+
+      // Normalize every line of the diff window
+      const windowLines = window.map(c => normalizeLine(c.content));
+
       const isMatch = snippetLines.every((line, j) => line === windowLines[j]);
 
       if (isMatch) {
+        // We have a match! Anchor the comment to the first ADDED line.
         const firstAddedChange = window.find(c => c.add);
         if (firstAddedChange) {
           const startLine = firstAddedChange.ln;

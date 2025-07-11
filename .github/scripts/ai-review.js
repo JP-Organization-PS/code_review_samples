@@ -50,21 +50,50 @@ function parseGitDiff(diffText) {
 }
 
 /**
- * Splits a parsed file into smaller chunks based on line count.
+ * Splits a parsed file into smaller, token-aware chunks.
  * @param {object} parsedFile - A file object parsed by 'parse-diff'.
- * @param {number} maxLines - Maximum lines per chunk.
+ * @param {number} promptTokens - The estimated token count of the base prompt.
+ * @param {number} tokenLimit - The maximum total tokens for a request.
  * @returns {Array<object>} - Array of chunk objects with filePath and chunkText.
  */
-function splitLargeFileChunks(parsedFile, maxLines = MAX_LINES_PER_CHUNK) {
+function splitLargeFileChunks(parsedFile, promptTokens, tokenLimit = TOKEN_LIMIT) {
   const chunks = [];
+  const maxChunkTokens = tokenLimit - promptTokens - 500; // 500 tokens buffer for safety
+
+  let currentChunkLines = [];
+  let currentChunkTokens = 0;
+  let lastChunkHeader = '';
+
   for (const chunk of parsedFile.chunks) {
-    const lines = chunk.changes.map(c => c.content);
-    for (let i = 0; i < lines.length; i += maxLines) {
-      const sliced = lines.slice(i, i + maxLines);
-      const content = [`@@ ${chunk.content} @@`, ...sliced].join('\n');
-      chunks.push({ filePath: parsedFile.to || parsedFile.from, chunkText: content });
+    const chunkHeader = `@@ ${chunk.content} @@`;
+    lastChunkHeader = chunkHeader; // Keep track of the latest header
+
+    for (const change of chunk.changes) {
+      const line = change.content;
+      const lineTokens = estimateTokens(line);
+
+      if (currentChunkTokens + lineTokens > maxChunkTokens && currentChunkLines.length > 0) {
+        chunks.push({
+          filePath: parsedFile.to || parsedFile.from,
+          chunkText: [chunkHeader, ...currentChunkLines].join('\n'),
+        });
+        currentChunkLines = [];
+        currentChunkTokens = 0;
+      }
+      
+      currentChunkLines.push(line);
+      currentChunkTokens += lineTokens;
     }
   }
+
+  // FIX: Add the last chunk with its corresponding header
+  if (currentChunkLines.length > 0) {
+    chunks.push({
+      filePath: parsedFile.to || parsedFile.from,
+      chunkText: [lastChunkHeader, ...currentChunkLines].join('\n'), // Use the last seen header
+    });
+  }
+
   return chunks;
 }
 
@@ -105,24 +134,30 @@ function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
   const targetFile = parsedFiles.find(file => file.to === filePath || file.from === filePath);
 
   if (!targetFile) {
-    console.warn(`File '${filePath}' not found in parsed diff for snippet matching.`);
+    console.warn(`File '${filePath}' not found for snippet matching.`);
     return null;
   }
 
-  const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());
-  // Filter for added lines as per the original logic, assuming issues are primarily on new/changed lines
-  const flatChanges = targetFile.chunks.flatMap(chunk => chunk.changes)
-    .filter(change => change.add && typeof change.content === 'string');
+  const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim().replace(/^\+/, ''));
 
-  for (let i = 0; i <= flatChanges.length - snippetLines.length; i++) {
-    // Remove the '+' prefix for added lines for accurate comparison
-    const window = flatChanges.slice(i, i + snippetLines.length).map(c => c.content.replace(/^\+/, '').trim());
-    const exactMatch = snippetLines.every((line, j) => line === window[j]);
-    if (exactMatch) {
-      // 'ln' for added lines, 'ln2' for removed lines in parse-diff
-      const startLine = flatChanges[i].ln;
-      console.log(`Matched snippet in diff for file ${filePath} at line ${startLine}`);
-      return { start: startLine, end: startLine + snippetLines.length - 1 };
+  for (const chunk of targetFile.chunks) {
+    // Check all changes (adds and context lines) within a chunk
+    for (let i = 0; i <= chunk.changes.length - snippetLines.length; i++) {
+      const window = chunk.changes.slice(i, i + snippetLines.length);
+      const windowLines = window.map(c => c.content.trim().replace(/^\+/, ''));
+
+      // Check if the lines in the window exactly match the snippet
+      const isMatch = snippetLines.every((line, j) => line === windowLines[j]);
+
+      if (isMatch) {
+        // Find the first added line in the matching window to anchor the comment
+        const firstAddedLine = window.find(c => c.add);
+        if (firstAddedLine) {
+          const startLine = firstAddedLine.ln;
+          console.log(`Matched snippet in diff for file ${filePath} at line ${startLine}`);
+          return { start: startLine, end: startLine + window.length - 1 };
+        }
+      }
     }
   }
 
@@ -433,38 +468,54 @@ async function postIssueComments(octokit, owner, repo, prNumber, commitId, issue
 
 
 // --- Main Review Logic ---
+// --- Main Review Logic ---
 
 async function reviewCode() {
   const { diff: fullDiff, changedFiles } = getGitDiff();
+  console.log("Starting review for the following changed files:", changedFiles);
   const fileChunks = splitDiffByFileChunks(fullDiff);
 
   const allIssues = [];
   const allHighlights = new Set();
   const overallSummaries = [];
 
+  // Estimate the token count of the base prompt itself.
+  const basePromptTokens = estimateTokens(buildPrompt(""));
+
   for (const file of fileChunks) {
     const { filePath, diff: fileDiffText, parsedFile } = file;
-    const tokenCount = estimateTokens(fileDiffText);
+    console.log(`\n---`);
+    console.log(`📄 Reviewing file: ${filePath}`);
 
-    // If the file's diff is too large, split it into smaller chunks
-    const chunksToProcess = tokenCount > TOKEN_LIMIT
-      ? splitLargeFileChunks(parsedFile)
-      : [{ filePath, chunkText: fileDiffText }];
+    const diffTokens = estimateTokens(fileDiffText);
+    let chunksToProcess;
 
-    for (const { filePath: chunkFilePath, chunkText } of chunksToProcess) {
+    if (basePromptTokens + diffTokens > TOKEN_LIMIT) {
+      chunksToProcess = splitLargeFileChunks(parsedFile, basePromptTokens, TOKEN_LIMIT);
+      console.log(`   - ❗ File diff is large (${diffTokens} tokens), splitting into ${chunksToProcess.length} token-aware chunks.`);
+    } else {
+      chunksToProcess = [{ filePath, chunkText: fileDiffText }];
+      console.log(`   - ✅ Reviewing entire file diff (${diffTokens} tokens) as a single chunk.`);
+    }
+
+    // Use .entries() to get the index of the chunk
+    for (const [index, { filePath: chunkFilePath, chunkText }] of chunksToProcess.entries()) {
+      if (chunksToProcess.length > 1) {
+        console.log(`     - 쪼개기 Processing chunk ${index + 1} of ${chunksToProcess.length}...`);
+      }
+
       const prompt = buildPrompt(chunkText);
       let reviewRaw;
       try {
         reviewRaw = await callAIModel(AI_MODEL, prompt);
       } catch (error) {
         console.error(`Skipping AI review for chunk in ${chunkFilePath} due to API error.`);
-        continue; // Continue to the next chunk/file
+        continue;
       }
 
       let parsedReview;
       try {
-        // Clean the raw response to ensure it's valid JSON
-        const cleaned = reviewRaw.replace(/```json|```/g, '').trim();
+        const cleaned = reviewRaw.replace(/```json|```/g, "").trim();
         parsedReview = JSON.parse(cleaned);
       } catch (e) {
         console.error(`Failed to parse AI JSON response for file ${chunkFilePath}:`, e.message);
@@ -472,17 +523,18 @@ async function reviewCode() {
         continue;
       }
 
-      if (parsedReview.overall_summary) {
+      // Only take the summary from the FIRST chunk of a file
+      if (parsedReview.overall_summary && index === 0) {
         overallSummaries.push(parsedReview.overall_summary);
       }
       if (parsedReview.highlights) {
         parsedReview.highlights.forEach(h => allHighlights.add(h));
       }
       if (parsedReview.issues?.length) {
-        // Assign the correct file path to each issue, which might be from a sub-chunk
         allIssues.push(...parsedReview.issues.map(issue => ({ ...issue, file: chunkFilePath })));
       }
     }
+    console.log(`--- Finished reviewing file: ${filePath}`);
   }
 
   const octokit = github.getOctokit(GITHUB_TOKEN);
@@ -501,24 +553,19 @@ async function reviewCode() {
     process.exit(1);
   }
 
-  // Filter issues to only include those in files that were actually changed in this PR
   const filteredIssues = allIssues.filter(issue => changedFiles.includes(issue.file));
 
-  // Before generating summaryMarkdown (to see what was collected)
   console.log('--- Collected Overall Summaries Before Generation ---');
   console.log(JSON.stringify(overallSummaries, null, 2));
   console.log('-----------------------------------');
 
-  // Post overall review summary
   const summaryMarkdown = generateReviewSummary(overallSummaries, allHighlights, filteredIssues);
   await postReviewSummary(octokit, owner, repo, prNumber, commitId, summaryMarkdown);
 
-  // THIS IS THE CRUCIAL LOG YOU'RE LOOKING FOR
   console.log('--- Full Overall Summary Markdown Being Posted ---');
-  console.log(summaryMarkdown); // Ensure this line is present
+  console.log(summaryMarkdown);
   console.log('-----------------------------------');
 
-  // Post individual inline comments for issues
   await postIssueComments(octokit, owner, repo, prNumber, commitId, filteredIssues, fullDiff);
 
   console.log('AI Code Review complete.');

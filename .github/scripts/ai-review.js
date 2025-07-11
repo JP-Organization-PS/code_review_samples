@@ -18,6 +18,26 @@ const CONFIG = {
   },
 };
 
+function splitDiffByFileChunks(diffText) {
+  const parsedFiles = parseDiff(diffText);
+  const fileChunks = [];
+
+  for (const file of parsedFiles) {
+    const fileDiffLines = [];
+    for (const chunk of file.chunks) {
+      const chunkHeader = `@@ ${chunk.content} @@`;
+      const chunkLines = chunk.changes.map(c => c.content);
+      fileDiffLines.push(chunkHeader, ...chunkLines);
+    }
+    fileChunks.push({
+      filePath: file.to || file.from,
+      diff: fileDiffLines.join('\n')
+    });
+  }
+
+  return fileChunks;
+}
+
 function getGitDiff() {
   try {
     const base = process.env.GITHUB_BASE_REF;
@@ -66,7 +86,7 @@ function getGitDiff() {
 }
 
 function buildPrompt(diff) {
-  return `You are an **extremely meticulous, highly critical, and relentlessly exhaustive expert software engineer and code reviewer**. Your paramount mission is to conduct a forensic analysis of the provided code. Your goal is to identify and report *every single possible issue, flaw, anti-pattern, potential bug, vulnerability, inefficiency, design imperfection, or area for improvement*, no matter how minor, subtle, or seemingly insignificant.
+  return `You are an **extremely meticulous, highly critical, and relentlessly exhaustive expert software engineer and code reviewer**. Your mission: mission is to conduct a forensic analysis of the provided code. Your goal is to identify and report *every single possible issue, flaw, anti-pattern, potential bug, vulnerability, inefficiency, design imperfection, or area for improvement*, no matter how minor, subtle, or seemingly insignificant.
 
 Adopt the mindset of a combined:
 - **Senior Software Architect**: Evaluating design patterns, modularity, scalability, extensibility, and maintainability.
@@ -87,6 +107,9 @@ Adopt the mindset of a combined:
 - **Design Flaws**: Architectural weaknesses, violation of SOLID principles, lack of extensibility, poor testability.
 - **Pythonic Idioms & Best Practices**: Deviations from standard, efficient, and readable Python patterns.
 - **Resource Management**: Unclosed files, network connections, database connections, unreleased locks, memory leaks.
+- **Concurrency & Thread Safety**: Identify **race conditions, deadlocks, livelocks, improper use of locks/mutexes, atomicity issues**, and potential for data corruption in multi-threaded or asynchronous environments.
+- **Third-Party Library/Dependency Risks**: Assess the usage of external libraries for **known vulnerabilities in specific versions, dependency confusion, or supply chain attack vectors**.
+- **Localization & Internationalization (I18n)**: Check for **hardcoded strings, incorrect character encodings, or non-locale-aware date/time/currency handling**.
 
 Review the following code diff and respond exclusively in strict JSON format.
 
@@ -137,7 +160,7 @@ async function requestAzure(prompt) {
         { role: "user", content: prompt },
       ],
       temperature: 0.3,
-      max_tokens: 16384,
+      max_tokens: 8192,
     },
     { headers: { 'api-key': key, 'Content-Type': 'application/json' } }
   );
@@ -150,7 +173,7 @@ async function requestGemini(prompt) {
     CONFIG.gemini.endpoint,
     {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: 16384 },
+      generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: 8192 },
     },
     { headers: { 'Content-Type': 'application/json' } }
   );
@@ -185,35 +208,39 @@ function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
 }
 
 async function reviewCode() {
-  const { diff, reviewType, fullContext, changedFiles } = getGitDiff(); 
+  const { diff, reviewType, changedFiles } = getGitDiff();
+  const fileChunks = splitDiffByFileChunks(diff);
 
-  const prompt = buildPrompt(diff);
-  const review = CONFIG.model === 'azure' ? await requestAzure(prompt) : await requestGemini(prompt);
+  const allIssues = [];
+  const allHighlights = new Set();
+  let overallSummaries = [];
 
-  console.log(`\n AI Review ouput Start \n`);
-  console.log(`AI Review ouput before parsing: ${review}`);
-  console.log(`\n AI Review ouput End \n`);
+  for (const { filePath, diff } of fileChunks) {
+    const prompt = buildPrompt(diff);
+    const review = CONFIG.model === 'azure' ? await requestAzure(prompt) : await requestGemini(prompt);
 
-  const cleaned = review.replace(/```json|```/g, '').trim();
+    const cleaned = review.replace(/```json|```/g, '').trim();
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
+      console.error(`Failed to parse AI JSON for file ${filePath}:`, e.message);
+      continue;
+    }
 
-  let parsed;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch (e) {
-    console.error("Failed to parse AI response JSON:", e.message);
-    process.exit(1);
+    if (parsed.overall_summary) overallSummaries.push(parsed.overall_summary);
+    if (parsed.highlights) parsed.highlights.forEach(h => allHighlights.add(h));
+    if (parsed.issues?.length) allIssues.push(...parsed.issues);
   }
-
-  const { overall_summary, highlights = [], issues = [] } = parsed;
-  const filteredIssues = issues.filter(issue => changedFiles.includes(issue.file));
 
   const octokit = github.getOctokit(process.env.GITHUB_TOKEN);
   const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
-  const prNumber = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/)?.[1] ||
-                   github.context.payload.pull_request?.number;
+  const prNumber = process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\/merge/)?.[1] || github.context.payload.pull_request?.number;
   const commitId = github.context.payload.pull_request?.head?.sha;
 
-  let summary = `### AI Code Review Summary\n\n**📝 Overall Summary:**  \n${overall_summary}\n\n**✅ Highlights:**  \n${highlights.map(p => `- ${p}`).join('\n')}`;
+  const filteredIssues = allIssues.filter(issue => changedFiles.includes(issue.file));
+
+  let summary = `### AI Code Review Summary\n\n**📝 Overall Summary:**  \n${overallSummaries.join("\n\n")}\n\n**✅ Highlights:**  \n${[...allHighlights].map(p => `- ${p}`).join('\n')}`;
 
   if (filteredIssues.length) {
     summary += `\n\n<details>\n<summary>⚠️ <strong>Detected Issues (${filteredIssues.length})</strong> — Click to expand</summary><br>\n`;
@@ -222,17 +249,13 @@ async function reviewCode() {
       let severityLabel = 'Low Priority';
 
       if (issue.severity === 'CRITICAL') {
-        emoji = '🔴';
-        severityLabel = 'Critical Priority';
+        emoji = '🔴'; severityLabel = 'Critical Priority';
       } else if (issue.severity === 'MAJOR') {
-        emoji = '🔴';
-        severityLabel = 'High Priority';
+        emoji = '🔴'; severityLabel = 'High Priority';
       } else if (issue.severity === 'MINOR') {
-        emoji = '🟠';
-        severityLabel = 'Medium Priority';
+        emoji = '🟠'; severityLabel = 'Medium Priority';
       } else if (issue.severity === 'INFO') {
-        emoji = '🔵';
-        severityLabel = 'Informational';
+        emoji = '🔵'; severityLabel = 'Informational';
       }
 
       summary += `\n- <details>\n  <summary><strong>${emoji} ${issue.title}</strong> <em>(${severityLabel})</em></summary>\n\n  **📁 File:** \`${issue.file}\`  \n  **🔢 Line:** ${issue.line || 'N/A'}\n\n  **📝 Description:**  \n  ${issue.description}\n\n  **💡 Suggestion:**  \n  ${issue.suggestion}\n  </details>`;
@@ -248,26 +271,18 @@ async function reviewCode() {
     event: 'COMMENT',
     body: summary,
   });
-  console.log(`Posted summary comment.`);
 
   for (const issue of filteredIssues) {
-    const result = matchSnippetFromDiff(fullContext || diff, issue.file, issue.code_snippet);
-    if (!result) {
-      console.warn(`Could not match code snippet for issue: '${issue.title}' in file: ${issue.file}`);
-      continue;
-    }
+    const result = matchSnippetFromDiff(diff, issue.file, issue.code_snippet);
+    if (!result) continue;
 
-    const priority = issue.severity === 'CRITICAL' || issue.severity === 'MAJOR'
-      ? '🔴 High Priority'
-      : issue.severity === 'MINOR'
-        ? '🟠 Medium Priority'
-        : issue.severity === 'INFO'
-          ? '🔵 Informational'
-          : '🟢 Low Priority';
+    const priority = issue.severity === 'CRITICAL' || issue.severity === 'MAJOR' ? '🔴 High Priority' :
+                     issue.severity === 'MINOR' ? '🟠 Medium Priority' :
+                     issue.severity === 'INFO' ? '🔵 Informational' : '🟢 Low Priority';
+
     const body = `#### ${priority}\n\n**Issue: ${issue.title}**  \n${issue.description}  \n\n**Suggestion:**  \n${issue.suggestion} \n\n
 
     ${issue.proposed_code_snippet ? `\n\`\`\`js\n${issue.proposed_code_snippet}\n\`\`\`` : ''}`;
-
 
     await octokit.rest.pulls.createReviewComment({
       owner,
@@ -279,8 +294,8 @@ async function reviewCode() {
       side: 'RIGHT',
       body,
     });
-    console.log(`Posted inline comment: ${issue.title}`);
   }
 }
+
 
 reviewCode();

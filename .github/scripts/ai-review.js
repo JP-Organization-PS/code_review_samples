@@ -40,18 +40,70 @@ function estimateTokens(text) {
   return Math.ceil(text.length / 4);
 }
 
-/**
- * Normalizes a line of code for reliable comparison by removing prefixes,
- * trimming whitespace, and collapsing internal spaces.
- * @param {string} line - The line of code.
- * @returns {string} - The normalized line.
- */
+// ==================================================================================
+// =================== THIS IS THE SPECIAL DEBUGGING FUNCTION ===================
+// ==================================================================================
 function normalizeLine(line) {
   return line
     .trim()
-    .replace(/^[\s+-]/, '') // Removes diff prefixes like '+', '-', or leading space
-    .replace(/\s+/g, ' ');   // Collapses multiple whitespace chars into a single space
+    .replace(/^[\s+-]/, '') // Removes diff prefixes
+    .replace(/\s+/g, ' ');   // Collapses internal whitespace
 }
+
+function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
+  const parsedFiles = parseDiff(diffText);
+  const targetFile = parsedFiles.find(file => file.to === filePath || file.from === filePath);
+
+  if (!targetFile) {
+    return null;
+  }
+
+  const snippetLines = codeSnippet.trim().split('\n').map(normalizeLine);
+  if (snippetLines.length === 0 || snippetLines.every(l => l === '')) {
+    return null;
+  }
+
+  for (const chunk of targetFile.chunks) {
+    for (let i = 0; i <= chunk.changes.length - snippetLines.length; i++) {
+      const window = chunk.changes.slice(i, i + snippetLines.length);
+      const windowLines = window.map(c => normalizeLine(c.content));
+
+      let allLinesMatch = true;
+      for (let j = 0; j < snippetLines.length; j++) {
+        if (snippetLines[j] !== windowLines[j]) {
+          allLinesMatch = false;
+          
+          // *** THIS IS THE DEBUGGING LOGIC ***
+          console.log('\n--- SNIPPET MISMATCH DETECTED ---');
+          console.log(`FILE: ${filePath}`);
+          console.log(`DETAILS: Line ${j + 1} of the snippet did not match.`);
+          console.log('AI SNIPPET (Normalized):  ', JSON.stringify(snippetLines[j]));
+          console.log('GIT DIFF   (Normalized):', JSON.stringify(windowLines[j]));
+          console.log('--- END MISMATCH ---\n');
+          
+          break;
+        }
+      }
+
+      if (allLinesMatch) {
+        const firstAddedChange = window.find(c => c.add);
+        if (firstAddedChange) {
+          const startLine = firstAddedChange.ln;
+          const endLine = window[window.length - 1].ln || startLine;
+          console.log(`✅ Matched snippet in diff for file ${filePath} at line ${startLine}`);
+          return { start: startLine, end: endLine };
+        }
+      }
+    }
+  }
+
+  console.warn(`❌ No exact match found in diff for snippet in file: ${filePath}`);
+  return null;
+}
+// ==================================================================================
+// ================= END OF SPECIAL DEBUGGING FUNCTION ==================
+// ==================================================================================
+
 
 /**
  * Parses a diff string into an array of file objects.
@@ -135,54 +187,6 @@ function splitDiffByFileChunks(diffText) {
   return fileChunks;
 }
 
-/**
- * Determines the line number of a code snippet using a robust, normalized comparison.
- * @param {string} diffText - The full diff text.
- * @param {string} filePath - The path of the file where the snippet is located.
- * @param {string} codeSnippet - The code snippet from the AI.
- * @returns {{start: number, end: number}|null}
- */
-function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
-  const parsedFiles = parseDiff(diffText);
-  const targetFile = parsedFiles.find(file => file.to === filePath || file.from === filePath);
-
-  if (!targetFile) {
-    console.warn(`File '${filePath}' not found for snippet matching.`);
-    return null;
-  }
-
-  // Normalize every line of the AI's snippet
-  const snippetLines = codeSnippet.trim().split('\n').map(normalizeLine);
-  if (snippetLines.length === 0 || snippetLines.every(l => l === '')) {
-    return null; // Ignore empty snippets
-  }
-
-  for (const chunk of targetFile.chunks) {
-    // Slide a "window" of lines across the diff's changes
-    for (let i = 0; i <= chunk.changes.length - snippetLines.length; i++) {
-      const window = chunk.changes.slice(i, i + snippetLines.length);
-
-      // Normalize every line of the diff window
-      const windowLines = window.map(c => normalizeLine(c.content));
-
-      const isMatch = snippetLines.every((line, j) => line === windowLines[j]);
-
-      if (isMatch) {
-        // We have a match! Anchor the comment to the first ADDED line.
-        const firstAddedChange = window.find(c => c.add);
-        if (firstAddedChange) {
-          const startLine = firstAddedChange.ln;
-          const endLine = window[window.length - 1].ln || startLine;
-          console.log(`✅ Matched snippet in diff for file ${filePath} at line ${startLine}`);
-          return { start: startLine, end: endLine };
-        }
-      }
-    }
-  }
-
-  console.warn(`❌ No exact match found in diff for snippet in file: ${filePath}`);
-  return null;
-}
 
 
 /**

@@ -130,52 +130,29 @@ function splitDiffByFileChunks(diffText) {
  * @returns {{start: number, end: number}|null} - The starting and ending line numbers, or null if not found.
  */
 function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
-  const parsedFiles = parseDiff(diffText);
+  const parsedFiles = parse(diffText);
   const targetFile = parsedFiles.find(file => file.to === filePath || file.from === filePath);
 
   if (!targetFile) {
-    console.warn(`File '${filePath}' not found in parsed diff for snippet matching.`);
+    console.warn(`File '${filePath}' not found in parsed diff.`);
     return null;
   }
 
-  // Normalize the AI's snippet by trimming and removing potential prefixes like '+'
-  const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim().replace(/^[\s+]/, ''));
+  const snippetLines = codeSnippet.trim().split('\n').map(l => l.trim());
+  const flatChanges = targetFile.chunks.flatMap(chunk => chunk.changes)
+    .filter(change => change.add && typeof change.content === 'string');
 
-  if (snippetLines.length === 0) {
-    return null;
-  }
-
-  // Iterate through each chunk of changes in the file
-  for (const chunk of targetFile.chunks) {
-    // Slide a "window" of lines across the diff's changes
-    for (let i = 0; i <= chunk.changes.length - snippetLines.length; i++) {
-      const window = chunk.changes.slice(i, i + snippetLines.length);
-
-      // Normalize the lines from the diff window for a clean comparison
-      const windowLines = window.map(c => c.content.trim().replace(/^[\s+]/, ''));
-
-      // Check if every line in the snippet matches the corresponding line in the window
-      const isMatch = snippetLines.every((line, j) => line === windowLines[j]);
-
-      if (isMatch) {
-        // We have a match! Now, find the line number to post the comment on.
-        // We prefer to anchor the comment to the first ADDED line in the snippet.
-        const firstAddedChange = window.find(c => c.add);
-
-        if (firstAddedChange) {
-          // Anchor to the first new line
-          const startLine = firstAddedChange.ln;
-          const endLine = window[window.length - 1].ln || startLine;
-          console.log(`✅ Matched snippet in diff for file ${filePath} at line ${startLine}`);
-          return { start: startLine, end: endLine };
-        }
-        // If the snippet has no added lines (e.g., it's just context), we can't comment on it.
-        // We could optionally anchor to the first line regardless of type, but this is safer.
-      }
+  for (let i = 0; i <= flatChanges.length - snippetLines.length; i++) {
+    const window = flatChanges.slice(i, i + snippetLines.length).map(c => c.content.replace(/^\+/, '').trim());
+    const exactMatch = snippetLines.every((line, j) => line === window[j]);
+    if (exactMatch) {
+      const startLine = flatChanges[i].ln;
+      console.log(`Matched snippet in diff for file ${filePath} at line ${startLine}`);
+      return { start: startLine, end: startLine + snippetLines.length - 1 };
     }
   }
 
-  console.warn(`❌ No exact match found in diff for snippet in file: ${filePath}`);
+  console.warn(`No match found in diff for snippet in file: ${filePath}`);
   return null;
 }
 

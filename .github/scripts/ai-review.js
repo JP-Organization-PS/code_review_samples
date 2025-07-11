@@ -8,6 +8,8 @@ const parseDiff = require('parse-diff'); // Renamed to avoid conflict with `pars
 const TOKEN_LIMIT = 8192;
 const MAX_LINES_PER_CHUNK = 150;
 const API_VERSION_AZURE = '2025-01-01-preview';
+const MAX_RETRIES = 3; // Maximum number of retry attempts
+const RETRY_DELAY_MS = 2000; // Initial delay in milliseconds (2 seconds)
 
 const GITHUB_EVENT_PATH = process.env.GITHUB_EVENT_PATH;
 const GITHUB_BASE_REF = process.env.GITHUB_BASE_REF;
@@ -198,55 +200,74 @@ ${diff}`;
 }
 
 /**
- * Calls the specified AI model with the given prompt.
+ * Calls the specified AI model with the given prompt, with a retry mechanism.
  * @param {string} modelName - The name of the AI model ('azure' or 'gemini').
  * @param {string} prompt - The prompt to send to the AI.
  * @returns {Promise<object>} - The parsed JSON response from the AI.
- * @throws {Error} If the API call fails or response is invalid.
+ * @throws {Error} If the API call fails after all retries.
  */
 async function callAIModel(modelName, prompt) {
   console.log(`Using ${modelName.toUpperCase()} model...`);
-  let res;
+  let lastError = null;
 
-  try {
-    if (modelName === 'azure') {
-      const { endpoint, deployment, key } = AZURE_CONFIG;
-      res = await axios.post(
-        `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${API_VERSION_AZURE}`,
-        {
-          messages: [
-            { role: "system", content: "You are a professional code reviewer." },
-            { role: "user", content: prompt },
-          ],
-          temperature: 0.3,
-          max_tokens: TOKEN_LIMIT,
-        },
-        { headers: { 'api-key': key, 'Content-Type': 'application/json' } }
-      );
-      return res.data.choices?.[0]?.message?.content?.trim();
-    } else if (modelName === 'gemini') {
-      const { endpoint } = GEMINI_CONFIG;
-      res = await axios.post(
-        endpoint,
-        {
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: TOKEN_LIMIT },
-        },
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-      return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    } else {
-      throw new Error(`Unsupported AI model: ${modelName}`);
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      let res;
+      if (modelName === 'azure') {
+        const { endpoint, deployment, key } = AZURE_CONFIG;
+        res = await axios.post(
+          `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${API_VERSION_AZURE}`,
+          {
+            messages: [
+              { role: "system", content: "You are a professional code reviewer." },
+              { role: "user", content: prompt },
+            ],
+            temperature: 0.3,
+            max_tokens: TOKEN_LIMIT,
+          },
+          { headers: { 'api-key': key, 'Content-Type': 'application/json' } }
+        );
+        return res.data.choices?.[0]?.message?.content?.trim();
+      } else if (modelName === 'gemini') {
+        const { endpoint } = GEMINI_CONFIG;
+        res = await axios.post(
+          endpoint,
+          {
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: TOKEN_LIMIT },
+          },
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+        return res.data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      } else {
+        throw new Error(`Unsupported AI model: ${modelName}`);
+      }
+    } catch (error) {
+      lastError = error;
+      console.error(`Attempt ${attempt} failed for ${modelName} model:`, error.message);
+
+      // Don't retry on client errors (e.g., 400 Bad Request), as they are unlikely to succeed.
+      if (error.response && error.response.status >= 400 && error.response.status < 500) {
+        console.error(`Client error (${error.response.status}), not retrying.`);
+        break; // Exit the loop immediately.
+      }
+
+      if (attempt < MAX_RETRIES) {
+        // Use exponential backoff for the delay
+        const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+        console.log(`Retrying in ${delay / 1000} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
-  } catch (error) {
-    console.error(`Error calling ${modelName} AI model:`, error.message);
-    // Log more details for Axios errors
-    if (error.response) {
-      console.error(`Status: ${error.response.status}`);
-      console.error(`Data: ${JSON.stringify(error.response.data)}`);
-    }
-    throw new Error(`Failed to get response from ${modelName} AI model.`);
   }
+
+  // If all retries failed, throw an error with details.
+  console.error(`All ${MAX_RETRIES} retries failed for ${modelName} model.`);
+  if (lastError.response) {
+    console.error(`Final Status: ${lastError.response.status}`);
+    console.error(`Final Data: ${JSON.stringify(lastError.response.data)}`);
+  }
+  throw new Error(`Failed to get response from ${modelName} AI model after ${MAX_RETRIES} attempts.`);
 }
 
 // --- Git and GitHub Interaction Functions ---
@@ -343,19 +364,23 @@ function generateReviewSummary(overallSummaries, allHighlights, filteredIssues) 
  * @param {string} summary - The Markdown summary to post.
  */
 async function postReviewSummary(octokit, owner, repo, prNumber, commitId, summary) {
-  try {
-    await octokit.rest.pulls.createReview({
-      owner,
-      repo,
-      pull_number: prNumber,
-      commit_id: commitId,
-      event: 'COMMENT', // Use 'COMMENT' for a general review comment
-      body: summary,
-    });
-    console.log('Successfully posted overall review summary.');
-  } catch (error) {
-    console.error('Failed to post overall review summary:', error.message);
-  }
+    try {
+        await octokit.rest.pulls.createReview({
+            owner,
+            repo,
+            pull_number: prNumber,
+            commit_id: commitId,
+            event: 'COMMENT',
+            body: summary,
+        });
+        console.log('Successfully posted overall review summary.');
+    } catch (error) {
+        console.error('Failed to post overall review summary:', error.message);
+        if (error.response) {
+            console.error(`Status: ${error.response.status}`);
+            console.error(`Data: ${JSON.stringify(error.response.data)}`);
+        }
+    }
 }
 
 /**

@@ -2,7 +2,8 @@ const axios = require('axios');
 const { execSync } = require('child_process');
 const github = require('@actions/github');
 const fs = require('fs');
-const parseDiff = require('parse-diff'); // Renamed to avoid conflict with `parse`
+const parseDiff = require('parse-diff'); 
+const similarity = require('string-similarity');
 
 // --- Constants ---
 const TOKEN_LIMIT = 16384;
@@ -50,7 +51,17 @@ function normalizeLine(line) {
     .replace(/\s+/g, ' ');   // Collapses internal whitespace
 }
 
+/**
+ * Determines the line number of a code snippet by first attempting an exact
+ * match (with debugging) and then falling back to fuzzy matching.
+ * @param {string} diffText - The full diff text.
+ * @param {string} filePath - The path of the file where the snippet is located.
+ * @param {string} codeSnippet - The code snippet from the AI.
+ * @returns {{start: number, end: number}|null}
+ */
 function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
+  const SIMILARITY_THRESHOLD = 0.85; // Match if strings are 85% similar
+
   const parsedFiles = parseDiff(diffText);
   const targetFile = parsedFiles.find(file => file.to === filePath || file.from === filePath);
 
@@ -58,48 +69,75 @@ function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
     return null;
   }
 
-  const snippetLines = codeSnippet.trim().split('\n').map(normalizeLine);
-  if (snippetLines.length === 0 || snippetLines.every(l => l === '')) {
+  const snippetLines = codeSnippet.trim().split('\n');
+  const normalizedSnippetLines = snippetLines.map(normalizeLine);
+  if (normalizedSnippetLines.length === 0 || normalizedSnippetLines.every(l => l === '')) {
     return null;
   }
 
+  // --- STAGE 1: Attempt an Exact Match (with Debugging) ---
   for (const chunk of targetFile.chunks) {
     for (let i = 0; i <= chunk.changes.length - snippetLines.length; i++) {
       const window = chunk.changes.slice(i, i + snippetLines.length);
-      const windowLines = window.map(c => normalizeLine(c.content));
+      const normalizedWindowLines = window.map(c => normalizeLine(c.content));
 
       let allLinesMatch = true;
-      for (let j = 0; j < snippetLines.length; j++) {
-        if (snippetLines[j] !== windowLines[j]) {
+      for (let j = 0; j < normalizedSnippetLines.length; j++) {
+        if (normalizedSnippetLines[j] !== normalizedWindowLines[j]) {
           allLinesMatch = false;
-          
-          // *** THIS IS THE DEBUGGING LOGIC ***
-          console.log('\n--- SNIPPET MISMATCH DETECTED ---');
+          // *** EXACT MATCH DEBUGGING LOGIC ***
+          console.log('\n--- EXACT MATCH FAILED ---');
           console.log(`FILE: ${filePath}`);
           console.log(`DETAILS: Line ${j + 1} of the snippet did not match.`);
-          console.log('AI SNIPPET (Normalized):  ', JSON.stringify(snippetLines[j]));
-          console.log('GIT DIFF   (Normalized):', JSON.stringify(windowLines[j]));
+          console.log('AI SNIPPET (Normalized):  ', JSON.stringify(normalizedSnippetLines[j]));
+          console.log('GIT DIFF   (Normalized):', JSON.stringify(normalizedWindowLines[j]));
           console.log('--- END MISMATCH ---\n');
-          
-          break;
+          break; // Stop checking this window
         }
       }
 
       if (allLinesMatch) {
+        console.log(`✅ Found exact match for snippet in ${filePath}`);
         const firstAddedChange = window.find(c => c.add);
         if (firstAddedChange) {
-          const startLine = firstAddedChange.ln;
-          const endLine = window[window.length - 1].ln || startLine;
-          console.log(`✅ Matched snippet in diff for file ${filePath} at line ${startLine}`);
-          return { start: startLine, end: endLine };
+          return { start: firstAddedChange.ln, end: window[window.length - 1].ln || firstAddedChange.ln };
         }
       }
     }
   }
 
-  console.warn(`❌ No exact match found in diff for snippet in file: ${filePath}`);
+  // --- STAGE 2: Fallback to Fuzzy Matching ---
+  console.log(`- Exact match failed. Attempting fuzzy match for snippet in ${filePath}...`);
+  const snippetText = normalizedSnippetLines.join('\n');
+
+  for (const chunk of targetFile.chunks) {
+    for (let i = 0; i <= chunk.changes.length - snippetLines.length; i++) {
+      const window = chunk.changes.slice(i, i + snippetLines.length);
+      const windowText = window.map(c => normalizeLine(c.content)).join('\n');
+      
+      const matchScore = similarity.compareTwoStrings(snippetText, windowText);
+
+      if (matchScore >= SIMILARITY_THRESHOLD) {
+        console.log(`✅ Found fuzzy match with score ${matchScore.toFixed(2)} in ${filePath}`);
+        const firstAddedChange = window.find(c => c.add);
+        if (firstAddedChange) {
+          return { start: firstAddedChange.ln, end: window[window.length - 1].ln || firstAddedChange.ln };
+        }
+      } 
+      // *** FUZZY MATCH DEBUGGING: Log "near misses" ***
+      else if (matchScore > 0.6) { // Log any score over 60%
+        console.log('\n--- POTENTIAL FUZZY MATCH (BELOW THRESHOLD) ---');
+        console.log(`FILE: ${filePath}`);
+        console.log(`DETAILS: Match score was ${matchScore.toFixed(2)} (Threshold is ${SIMILARITY_THRESHOLD})`);
+        console.log('--- END POTENTIAL MATCH ---\n');
+      }
+    }
+  }
+
+  console.warn(`❌ No exact or fuzzy match found for snippet in file: ${filePath}`);
   return null;
 }
+
 // ==================================================================================
 // ================= END OF SPECIAL DEBUGGING FUNCTION ==================
 // ==================================================================================

@@ -479,9 +479,19 @@ async function reviewCode() {
   // Filter issues to only include those in files that were actually changed in this PR
   const filteredIssues = allIssues.filter(issue => changedFiles.includes(issue.file));
 
+  // Before generating summaryMarkdown (to see what was collected)
+  console.log('--- Collected Overall Summaries Before Generation ---');
+  console.log(JSON.stringify(overallSummaries, null, 2));
+  console.log('-----------------------------------');
+
   // Post overall review summary
   const summaryMarkdown = generateReviewSummary(overallSummaries, allHighlights, filteredIssues);
   await postReviewSummary(octokit, owner, repo, prNumber, commitId, summaryMarkdown);
+
+  // THIS IS THE CRUCIAL LOG YOU'RE LOOKING FOR
+  console.log('--- Full Overall Summary Markdown Being Posted ---');
+  console.log(summaryMarkdown); // Ensure this line is present
+  console.log('-----------------------------------');
 
   // Post individual inline comments for issues
   await postIssueComments(octokit, owner, repo, prNumber, commitId, filteredIssues, fullDiff);

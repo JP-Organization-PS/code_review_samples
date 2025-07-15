@@ -7,7 +7,7 @@ const similarity = require('string-similarity');
 const Parser = require('tree-sitter');
 
 // --- Constants ---
-const TOKEN_LIMIT = 16384;
+const TOKEN_LIMIT = 8192;
 const API_VERSION_AZURE = '2025-01-01-preview';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
@@ -88,12 +88,7 @@ const LANGUAGE_CONFIG = {
         extensions: ['.cpp', '.hpp', '.cc', '.hh', '.cxx', '.hxx'],
         module: 'tree-sitter-cpp',
         query: `[(function_definition) @function (class_specifier) @function (template_declaration) @function]`,
-    },
-    yaml: {
-        extensions: ['.yml', '.yaml'],
-        module: 'tree-sitter-yaml',
-        query: `(block_mapping_pair) @function`
-    },
+    }
 };
 
 // --- Utility & Chunking Functions ---
@@ -149,7 +144,10 @@ function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
                 console.log(`✅ Found fuzzy match for snippet in ${filePath}`);
                 const firstAddedChange = window.find(c => c.add);
                 if (firstAddedChange) {
-                    return { start: firstAddedChange.ln, end: window[window.length - 1].ln || firstAddedChange.ln };
+                    const lastChange = window[window.length - 1];
+                    // A normal change has both, an add has only 'ln', a delete has only 'ln2'
+                    const endLine = lastChange.add ? lastChange.ln : (lastChange.del ? lastChange.ln2 : lastChange.ln);
+                    return { start: firstAddedChange.ln, end: endLine || firstAddedChange.ln };
                 }
             }
         }

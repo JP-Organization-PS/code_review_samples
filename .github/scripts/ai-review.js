@@ -129,9 +129,17 @@ function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
     const targetFile = parsedFiles.find(file => file.to === filePath || file.from === filePath);
     if (!targetFile) return null;
 
+    if (!codeSnippet || typeof codeSnippet !== 'string') {
+        console.warn(`Invalid code snippet provided for file: ${filePath}`);
+        return null;
+    }
+
     const snippetLines = codeSnippet.trim().split('\n');
     const normalizedSnippetLines = snippetLines.map(normalizeLine);
     if (normalizedSnippetLines.length === 0 || normalizedSnippetLines.every(l => l === '')) return null;
+
+    // FIX: The missing line is added here.
+    const snippetText = normalizedSnippetLines.join('\n');
 
     for (const chunk of targetFile.chunks) {
         for (let i = 0; i <= chunk.changes.length - snippetLines.length; i++) {

@@ -27,7 +27,7 @@ const AZURE_CONFIG = {
 
 const GEMINI_CONFIG = {
     key: process.env.GEMINI_API_KEY,
-    endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent`, // Key removed from URL
 };
 
 /**
@@ -88,12 +88,7 @@ const LANGUAGE_CONFIG = {
         extensions: ['.cpp', '.hpp', '.cc', '.hh', '.cxx', '.hxx'],
         module: 'tree-sitter-cpp',
         query: `[(function_definition) @function (class_specifier) @function (template_declaration) @function]`,
-    },
-    yaml: {
-        extensions: ['.yml', '.yaml'],
-        module: 'tree-sitter-yaml',
-        query: `(block_mapping_pair) @function`
-    },
+    }
 };
 
 // --- Utility & Chunking Functions ---
@@ -149,12 +144,19 @@ function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
                 console.log(`✅ Found fuzzy match for snippet in ${filePath}`);
                 const firstAddedChange = window.find(c => c.add);
                 if (firstAddedChange) {
-                    return { start: firstAddedChange.ln, end: window[window.length - 1].ln || firstAddedChange.ln };
+                    const lastChange = window[window.length - 1];
+                    // A normal change has both, an add has only 'ln', a delete has only 'ln2'
+                    const endLine = lastChange.add ? lastChange.ln : (lastChange.del ? lastChange.ln2 : lastChange.ln);
+                    return { start: firstAddedChange.ln, end: endLine || firstAddedChange.ln };
                 }
             }
         }
     }
     console.warn(`❌ No match found for snippet in file: ${filePath}`);
+
+    console.log("\n--- Snippet that failed to match ---\n");
+    console.log(codeSnippet);
+    console.log("\n------------------------------------\n");
     return null;
 }
 
@@ -376,8 +378,8 @@ async function callAIModel(modelName, prompt, promptTokens) {
                 );
                 return res.data.choices?.[0]?.message?.content?.trim();
             } else if (modelName === 'gemini') {
-                const { endpoint } = GEMINI_CONFIG;
-                res = await axios.post(endpoint,
+                const { endpoint, key } = GEMINI_CONFIG;
+                res = await axios.post(`${endpoint}?key=${key}`,
                     { contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: availableOutputTokens } },
                     { headers: { 'Content-Type': 'application/json' } }
                 );
@@ -509,21 +511,31 @@ async function postReviewSummary(octokit, owner, repo, prNumber, commitId, summa
 async function postIssueComments(octokit, owner, repo, prNumber, commitId, issues, fullDiff) {
     for (const issue of issues) {
         let commentLine;
+        // Construct the base body first
+        let body = `**AI Suggestion: ${issue.title}** (${issue.severity})\n\n${issue.description}\n\n**Suggestion:**\n${issue.suggestion}\n\n${issue.proposed_code_snippet ? `\`\`\`suggestion\n${issue.proposed_code_snippet}\n\`\`\`` : ''}`;
+
         if (issue.chunkType === 'function') {
             commentLine = issue.functionStartLine;
             console.log(`Pinning comment for "${issue.title}" to function start line ${commentLine} in ${issue.file}`);
         } else {
             const snippetLocation = matchSnippetFromDiff(fullDiff, issue.file, issue.code_snippet);
-            if (!snippetLocation) {
-                console.warn(`Could not find diff location for issue in ${issue.file}. Skipping inline comment.`);
-                continue;
+            
+            // --- MODIFICATION START ---
+            if (snippetLocation) {
+                // If we found a match, use its start line
+                commentLine = snippetLocation.start;
+            } else {
+                // If no match, fallback to a file-level comment on line 1
+                console.warn(`Could not find exact diff location for "${issue.title}" in ${issue.file}. Posting as a file-level comment.`);
+                commentLine = 1;
+                // Prepend a note to the body explaining the situation
+                body = `**⚠️ AI Suggestion (could not pinpoint exact line): ${issue.title}** (${issue.severity})\n\n> This comment is placed at the top of the file because the exact location of the code snippet could not be found in the diff.\n\n---\n\n` + body;
             }
-            commentLine = snippetLocation.start;
+            // --- MODIFICATION END ---
         }
 
         if (!commentLine) continue;
 
-        const body = `**AI Suggestion: ${issue.title}** (${issue.severity})\n\n${issue.description}\n\n**Suggestion:**\n${issue.suggestion}\n\n${issue.proposed_code_snippet ? `\`\`\`suggestion\n${issue.proposed_code_snippet}\n\`\`\`` : ''}`;
         try {
             await octokit.rest.pulls.createReviewComment({ owner, repo, pull_number: prNumber, commit_id: commitId, path: issue.file, line: commentLine, side: 'RIGHT', body });
             console.log(`Posted inline comment for: "${issue.title}" in ${issue.file}:${commentLine}`);
@@ -593,6 +605,10 @@ async function reviewCode() {
                 }
             } catch (e) {
                 console.error(`Failed to parse AI JSON response for ${chunk.filePath}:`, e.message);
+                console.log("\n--- START: RAW AI Response that failed to parse ---\n");
+                console.log(reviewRaw);
+                console.log("\n--- END: RAW AI Response ---\n");
+        // ------------------------------------------
             }
         }
         console.log(`--- Finished reviewing file: ${filePath}`);

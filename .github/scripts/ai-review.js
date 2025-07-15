@@ -153,6 +153,10 @@ function matchSnippetFromDiff(diffText, filePath, codeSnippet) {
         }
     }
     console.warn(`❌ No match found for snippet in file: ${filePath}`);
+
+    console.log("\n--- Snippet that failed to match ---\n");
+    console.log(codeSnippet);
+    console.log("\n------------------------------------\n");
     return null;
 }
 

@@ -507,21 +507,31 @@ async function postReviewSummary(octokit, owner, repo, prNumber, commitId, summa
 async function postIssueComments(octokit, owner, repo, prNumber, commitId, issues, fullDiff) {
     for (const issue of issues) {
         let commentLine;
+        // Construct the base body first
+        let body = `**AI Suggestion: ${issue.title}** (${issue.severity})\n\n${issue.description}\n\n**Suggestion:**\n${issue.suggestion}\n\n${issue.proposed_code_snippet ? `\`\`\`suggestion\n${issue.proposed_code_snippet}\n\`\`\`` : ''}`;
+
         if (issue.chunkType === 'function') {
             commentLine = issue.functionStartLine;
             console.log(`Pinning comment for "${issue.title}" to function start line ${commentLine} in ${issue.file}`);
         } else {
             const snippetLocation = matchSnippetFromDiff(fullDiff, issue.file, issue.code_snippet);
-            if (!snippetLocation) {
-                console.warn(`Could not find diff location for issue in ${issue.file}. Skipping inline comment.`);
-                continue;
+            
+            // --- MODIFICATION START ---
+            if (snippetLocation) {
+                // If we found a match, use its start line
+                commentLine = snippetLocation.start;
+            } else {
+                // If no match, fallback to a file-level comment on line 1
+                console.warn(`Could not find exact diff location for "${issue.title}" in ${issue.file}. Posting as a file-level comment.`);
+                commentLine = 1;
+                // Prepend a note to the body explaining the situation
+                body = `**⚠️ AI Suggestion (could not pinpoint exact line): ${issue.title}** (${issue.severity})\n\n> This comment is placed at the top of the file because the exact location of the code snippet could not be found in the diff.\n\n---\n\n` + body;
             }
-            commentLine = snippetLocation.start;
+            // --- MODIFICATION END ---
         }
 
         if (!commentLine) continue;
 
-        const body = `**AI Suggestion: ${issue.title}** (${issue.severity})\n\n${issue.description}\n\n**Suggestion:**\n${issue.suggestion}\n\n${issue.proposed_code_snippet ? `\`\`\`suggestion\n${issue.proposed_code_snippet}\n\`\`\`` : ''}`;
         try {
             await octokit.rest.pulls.createReviewComment({ owner, repo, pull_number: prNumber, commit_id: commitId, path: issue.file, line: commentLine, side: 'RIGHT', body });
             console.log(`Posted inline comment for: "${issue.title}" in ${issue.file}:${commentLine}`);

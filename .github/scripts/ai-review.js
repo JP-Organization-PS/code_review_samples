@@ -7,7 +7,7 @@ const similarity = require('string-similarity');
 const Parser = require('tree-sitter');
 
 // --- Constants ---
-const TOKEN_LIMIT = 8192;
+const TOKEN_LIMIT = 16384;
 const API_VERSION_AZURE = '2025-01-01-preview';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;

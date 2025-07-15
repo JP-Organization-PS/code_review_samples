@@ -439,16 +439,33 @@ function getGitDiff() {
 /**
  * Generates a Markdown summary of the entire code review.
  * @param {string[]} overallSummaries An array of summary strings from the AI.
- * @param {Set<string>} allHighlights A set of all highlight strings.
+ * @param {Set<string|object>} allHighlights A set of all highlight items.
  * @param {object[]} filteredIssues An array of issue objects relevant to the PR.
  * @returns {string} The formatted Markdown summary.
  */
 function generateReviewSummary(overallSummaries, allHighlights, filteredIssues) {
-    let summary = `### AI Code Review Summary\n\n**📝 Overall Impression:**\n${overallSummaries.join("\n\n")}\n\n**✅ Highlights:**\n${[...allHighlights].map(p => `- ${p}`).join('\n') || 'No significant improvements noted.'}`;
+    // FIX: Process highlights to handle both strings and objects.
+    const highlightItems = [...allHighlights].map(p => {
+        if (typeof p === 'string') {
+            return `- ${p}`; // It's already a string, just use it.
+        }
+        if (typeof p === 'object' && p !== null) {
+            // If it's an object, try to format it from its properties.
+            if (p.category && p.description) {
+                return `- ${p.category}: ${p.description}`;
+            }
+            // As a fallback, convert the object to a JSON string.
+            return `- ${JSON.stringify(p)}`;
+        }
+        return `- ${p}`; // Default for any other type.
+    }).join('\n');
+
+    let summary = `### AI Code Review Summary\n\n**📝 Overall Impression:**\n${overallSummaries.join("\n\n")}\n\n**✅ Highlights:**\n${highlightItems || 'No significant improvements noted.'}`;
+    
     if (filteredIssues.length) {
         summary += `\n\n<details>\n<summary>⚠️ **Detected Issues (${filteredIssues.length})** — Click to expand</summary><br>\n`;
         for (const issue of filteredIssues) {
-            let emoji = '🔵';
+            let emoji = '🔵'; // Info
             if (issue.severity === 'CRITICAL') emoji = '🔴';
             else if (issue.severity === 'MAJOR') emoji = '🟠';
             else if (issue.severity === 'MINOR') emoji = '🟡';

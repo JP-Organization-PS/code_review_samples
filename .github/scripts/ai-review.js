@@ -601,6 +601,10 @@ async function reviewCode() {
                 }
             } catch (e) {
                 console.error(`Failed to parse AI JSON response for ${chunk.filePath}:`, e.message);
+                console.log("\n--- START: RAW AI Response that failed to parse ---\n");
+                console.log(reviewRaw);
+                console.log("\n--- END: RAW AI Response ---\n");
+        // ------------------------------------------
             }
         }
         console.log(`--- Finished reviewing file: ${filePath}`);

@@ -27,7 +27,7 @@ const AZURE_CONFIG = {
 
 const GEMINI_CONFIG = {
     key: process.env.GEMINI_API_KEY,
-    endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent`, // Key removed from URL
 };
 
 /**
@@ -374,8 +374,8 @@ async function callAIModel(modelName, prompt, promptTokens) {
                 );
                 return res.data.choices?.[0]?.message?.content?.trim();
             } else if (modelName === 'gemini') {
-                const { endpoint } = GEMINI_CONFIG;
-                res = await axios.post(endpoint,
+                const { endpoint, key } = GEMINI_CONFIG;
+                res = await axios.post(`${endpoint}?key=${key}`,
                     { contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1, topP: 0.9, maxOutputTokens: availableOutputTokens } },
                     { headers: { 'Content-Type': 'application/json' } }
                 );

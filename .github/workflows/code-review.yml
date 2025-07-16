@@ -17,7 +17,7 @@ jobs:
   # A single job in this workflow
   ai-review:
     # This line calls your central, reusable workflow.
-    uses: JP-Organization-PS/ai-review-action/.github/workflows/reusable-review.yml@main
+    uses: JP-Organization-PS/ai-review-action/.github/workflows/ai-review-workflow.yml@main
 
     # This section passes the required secrets to the reusable workflow.
     # The reusable workflow needs the API key to communicate with the AI service.

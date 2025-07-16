@@ -9,6 +9,9 @@ on:
     # Triggers on creation, when new commits are pushed, or when a PR is reopened
     types: [opened, synchronize, reopened]
 
+permissions:
+  pull-requests: write
+  
 jobs:
   # A single job in this workflow
   ai-review:

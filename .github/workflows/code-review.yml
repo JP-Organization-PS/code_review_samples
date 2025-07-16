@@ -3,7 +3,7 @@
 
 name: AI Code Review
 
-# This specifies that the workflow should run on pull request events for again test   testing
+# This specifies that the workflow should run on pull request events for again test  test  testing
 on:
   pull_request:
     # Triggers on creation, when new commits are pushed, or when a PR is reopened

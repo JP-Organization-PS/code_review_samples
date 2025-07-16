@@ -8,7 +8,6 @@ const Parser = require('tree-sitter');
 
 // --- Constants ---
 const TOKEN_LIMIT = 16384;
-const API_VERSION_AZURE = '2025-01-01-preview';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 
@@ -17,17 +16,24 @@ const GITHUB_BASE_REF = process.env.GITHUB_BASE_REF;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
 
-const AI_MODEL = process.env.AI_MODEL || 'gemini';
+const AI_MODEL = process.env.AI_MODEL;
+
+const AZURE_OPENAI_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
+const AZURE_OPENAI_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT;
+const AZURE_API_VERSION = process.env.AZURE_API_VERSION;
+
+const GEMINI_ENDPOINT_BASE = process.env.GEMINI_ENDPOINT_BASE;
+const GEMINI_MODEL_NAME = process.env.GEMINI_MODEL_NAME;
 
 const AZURE_CONFIG = {
     key: process.env.AZURE_OPENAI_KEY,
-    endpoint: process.env.AZURE_OPENAI_ENDPOINT,
-    deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
+    endpoint: AZURE_OPENAI_ENDPOINT,
+    deployment: AZURE_OPENAI_DEPLOYMENT,
 };
 
 const GEMINI_CONFIG = {
     key: process.env.GEMINI_API_KEY,
-    endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent`, // Key removed from URL
+    endpoint: `${GEMINI_ENDPOINT_BASE}/v1beta/models/${GEMINI_MODEL_NAME}:generateContent`,
 };
 
 /**
@@ -372,7 +378,7 @@ async function callAIModel(modelName, prompt, promptTokens) {
             let res;
             if (modelName === 'azure') {
                 const { endpoint, deployment, key } = AZURE_CONFIG;
-                res = await axios.post(`${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${API_VERSION_AZURE}`,
+                res = await axios.post(`${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${AZURE_API_VERSION}`,
                     { messages: [{ role: "system", content: "You are a professional code reviewer." }, { role: "user", content: prompt }], temperature: 0.3, max_tokens: availableOutputTokens },
                     { headers: { 'api-key': key, 'Content-Type': 'application/json' } }
                 );

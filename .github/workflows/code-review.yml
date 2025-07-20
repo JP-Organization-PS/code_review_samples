@@ -1,0 +1,34 @@
+# .github/workflows/code-review.yml
+# This file goes into any repository where you want to run the AI review.
+
+name: AI Code Review
+
+# This specifies that the workflow should run on pull request events for again test  test testing
+on:
+  pull_request:
+    # Triggers on creation, when new commits are pushed, or when a PR is reopened
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read          # Add this line
+  pull-requests: write
+
+jobs:
+  # A single job in this workflow
+  ai-review:
+    # This line calls your central, reusable workflow.
+    uses: JP-Organization-PS/ai-review-action/.github/workflows/ai-review-workflow.yml@main
+
+    # This section passes the required secrets to the reusable workflow.
+    # The reusable workflow needs the API key to communicate with the AI service.
+    secrets:
+      # The name 'GEMINI_API_KEY' must match a secret defined in the reusable workflow.
+      # You only need to provide the secrets for the AI model you are using.
+      #
+      # For Gemini (default):
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      # For Azure (if you override the model input):
+      # AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
+      # AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+      # AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}

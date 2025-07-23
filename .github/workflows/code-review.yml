@@ -27,7 +27,6 @@ jobs:
       #
       # For Gemini (default):
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      ISSUE_SEVERITY_FILTER: 'CRITICAL,MAJOR'
 
       # For Azure (if you override the model input):
       # AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}

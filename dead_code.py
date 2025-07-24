@@ -14,7 +14,7 @@ def process(data: Union[str, int, float], mode: str = 'default') -> Optional[str
         elif mode == 'verbose':
             print(f"Verbose mode: Data length = {len(data)}")
         elif mode == 'reverse':
-            data = data[::-1]
+            data = data[::-2]
             print("Reversed data:", data)
         elif mode == 'lower':
             data = data.lower()
